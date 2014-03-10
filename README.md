@@ -11,8 +11,10 @@ In order to run certchecker you need to following dependencies installed:
 - Google's protobuf library
 - yaml bindings for python (http://pyyaml.org/)
 - Dulwich - python implementation of GIT (https://www.samba.org/~jelmer/dulwich/docs/)
-- ssh command in your PATH
+- *ssh* command in your PATH
 - argparse library
+- dnspython library (http://www.dnspython.org/)
+- pyOpenSSL (https://launchpad.net/pyopenssl/)
 
 You can also use debian packaging rules from debian/ directory to build a deb
 package.
@@ -123,9 +125,8 @@ certcheck:DATA_TTL == 25 hours.
 ### Maintenance
 
 In order to not to let the "$repo_tmpdir/repository" repository grow endlessly
-a 'git gc' command should be executed once a day by i.e. a cronjob. It should
+a 'git gc' command should be executed once a day by i.e. a cronjob. It will
 repack all the packs and remove dangling objects.
-Please see the doc/USAGE.md file for details.
 
 ## Contributing
 
