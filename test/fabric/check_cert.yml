@@ -1,22 +1,40 @@
 ---
-lockfile: ./check_cert.lock
+#Global
+lockfile: /tmp/check_cert.lock
+
+#Riemann related:
+riemann_enabled: False
+riemann_ttl: 60
+riemann_hosts:
+  static:
+    - 192.168.122.16:5555:udp
+    - 192.168.122.16:5555:tcp
+  by_srv:
+    - _riemann._tcp
+    - _riemann._udp
+riemann_tags:
+  - production
+  - class::check_cert
+
+#Nagios related:
+nrpe_enabled: True
+
+#Repository related:
+repo_host: git.example.com
+repo_port: 22
+repo_url: /sample-repo
+repo_masterbranch: refs/heads/production
+repo_localdir: /tmp/check_cert-temprepo
+repo_user: check_cert
+repo_pubkey: /home/vespian/work/tmp_tickets/cert_check/check_cert_id_rsa
+
+#Check related:
 warn_treshold: 30
 critical_treshold: 15
-riemann_hosts:
-  - 127.0.0.1
-  - 127.0.0.2
-riemann_port: 1234
-riemann_tags:
-  - abc
-  - def
-repo_host: git.foo.net
-repo_port: 22
-repo_url: /foo-puppet
-repo_masterbranch: refs/heads/foo
-repo_localdir: /tmp/foo
-repo_user: foo
-repo_pubkey: ./foo
 # sha1sum ./certificate_to_be_ignored
 # format - dict, hash as a key, and value as a comment
 ignored_certs:
-  42b270cbd03eaa8c16c386e66f910195f769f8b1: "certificate used during unit-tests"
+  208a4ffc0bb0aa9ce6ccf6ed8fe3aa289a24f4dc: "dh2048.pem - openvpn DH params"
+  418b085d32a2dd0777c53fb5eedf1a92b0f4d112: "storage_resolve - rsa key"
+  99753a302f50fb085cae06ac4176c8bdf7d96016: "uits_priv_key.pem - rsa key"
+  b82e55a5a2eb8b9dec81cbe55ba4d90809509a16: "uits_pub_key.pem - rsa key"
