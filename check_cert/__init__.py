@@ -30,6 +30,8 @@ from datetime import datetime, timedelta
 from dulwich.client import SSHGitClient, SubprocessWrapper, TraditionalGitClient
 from dulwich.protocol import Protocol
 from dulwich.repo import Repo
+from pymisc.monitoring import ScriptStatus
+from pymisc.script import RecoverableException, ScriptConfiguration, ScriptLock
 import argparse
 import bernhard
 import dns.resolver
@@ -47,17 +49,8 @@ import yaml
 #Constants:
 LOCKFILE_LOCATION = './'+os.path.basename(__file__)+'.lock'
 CONFIGFILE_LOCATION = './'+os.path.basename(__file__)+'.conf'
-DATA_TTL = 25*60*60  # Data gathered by the script run is valid for 25 hours.
 SERVICE_NAME = 'check_cert'
 CERTIFICATE_EXTENSIONS = ['der', 'crt', 'pem', 'cer', 'p12', 'pfx', ]
-
-
-class RecoverableException(Exception):
-    """
-    Exception used to differentiate between errors which should be reported
-    to Riemann, and the ones that should be only logged due to their severity
-    """
-    pass
 
 
 class PubkeySSHGitClient(SSHGitClient):
@@ -202,311 +195,6 @@ class CertStore(object):
         return certs
 
 
-class ScriptConfiguration(object):
-    """
-    Simple file configuration class basing on the YAML format
-    """
-    _config = dict()
-
-    @classmethod
-    def load_config(cls, file_path):
-        """
-        @param string file_path     path to the configuration file
-        """
-        try:
-            with open(file_path, 'r') as fh:
-                cls._config = yaml.load(fh)
-        except IOError as e:
-            logging.error("Failed to open config file {0}: {1}".format(
-                file_path, e))
-            sys.exit(1)
-        except (yaml.parser.ParserError, ValueError) as e:
-            logging.error("File {0} is not a proper yaml document: {1}".format(
-                file_path, e))
-            sys.exit(1)
-
-    @classmethod
-    def get_val(cls, key):
-        return cls._config[key]
-
-
-class ScriptStatus(object):
-
-    _STATES = {'ok': 0,
-               'warn': 1,
-               'critical': 2,
-               'unknown': 3,
-               }
-
-    _exit_status = 'ok'
-    _exit_message = ''
-    _riemann_connections = []
-    _riemann_tags = None
-    _hostname = ''
-    _debug = None
-
-    @classmethod
-    def _send_data(cls, event):
-        """
-        Send script status to all Riemann servers using all the protocols that
-        were configured.
-        """
-        for riemann_connection in cls._riemann_connections:
-            logging.info('Sending event {0}, '.format(str(event)) +
-                         'using Riemann conn {0}:{1}'.format(
-                             riemann_connection.host, riemann_connection.port)
-                         )
-            if not cls._debug:
-                try:
-                    riemann_connection.send(event)
-                except Exception as e:
-                    logging.exception("Failed to send event to Rieman host: " +
-                                      "{0}".format(str(e))
-                                      )
-                    continue
-                else:
-                    logging.info("Event sent succesfully")
-            else:
-                logging.info('Debug flag set, I am performing no-op instead of '
-                             'real sent call')
-
-    @classmethod
-    def _name2ip(cls, name):
-        """
-        Resolve a dns name. In case it is already an IP - just return it.
-        """
-        if re.match('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', name):
-            #IP entry:
-            return name
-        else:
-            #Hostname, we need to resolve it:
-            try:
-                ipaddr = dns.resolver.query(name, 'A')
-            except dns.resolver.NXDOMAIN:
-                logging.error("A record for {0} was not found".format(name))
-                return name  # Let somebody else worry about it ;)
-
-            return ipaddr[0].to_text()
-
-    @classmethod
-    def _resolve_srv_hosts(cls, name):
-        """
-        Find Riemann servers by resolving SRV record, provide some sanity
-        checks as well.
-        """
-        result = []
-        logging.debug("Resolving " + name)
-        if name.find('._udp') > 0:
-            proto = 'udp'
-        elif name.find('._tcp') > 0:
-            proto = 'tcp'
-        else:
-            raise RecoverableException("Entry {0} ".format(name) +
-                                       "is not a valid SRV name")
-
-        try:
-            resolved = dns.resolver.query(name, 'SRV')
-        except dns.resolver.NXDOMAIN:
-            logging.error("Entry {0} does not exist, skipping.")
-            return []
-
-        for rdata in resolved:
-            entry = namedtuple("RiemannHost", ['host', 'port', 'proto'])
-            entry.host = cls._name2ip(rdata.target.to_text())
-            if entry.host is None:
-                continue
-            entry.port = rdata.port
-            entry.proto = proto
-            result.append(entry)
-            logging.debug("String {0} resolved as {1}".format(name, str(entry)))
-
-        return result
-
-    @classmethod
-    def _resolve_static_entry(cls, name):
-        """
-        Find Riemann servers by resolving plain A record, provide some sanity
-        checks as well.
-        """
-        entry = namedtuple("RiemannHost", ['host', 'port', 'proto'])
-        try:
-            a, b, c = name.split(":")
-            entry.host = cls._name2ip(a)
-            if entry.host is None:
-                raise ValueError()
-            entry.port = int(b)  # Raises ValueError by itself
-            if c in ['tcp', 'udp']:
-                entry.proto = c
-            else:
-                raise ValueError()
-        except ValueError:
-            logging.error("String {0} is not a valid ip:port:proto entry")
-            return []
-
-        logging.debug("String {0} resolved as {1}".format(name, str(entry)))
-        return [entry]
-
-    @classmethod
-    def initialize(cls, riemann_hosts_config, riemann_tags, debug=False):
-        cls._riemann_tags = riemann_tags
-        cls._hostname = socket.gethostname()
-        cls._debug = debug
-        cls._exit_status = 'ok'
-        cls._exit_message = ''
-        cls._riemann_connections = []  # FIXME - we should probably do
-                                       # some disconect here if we re-initialize
-                                       # probably using conn.shutdown() call
-
-        if not riemann_tags:
-            logging.error('there should be at least one Riemann tag defined.')
-            return  # should it sys.exit or just return ??
-        tmp = []
-        if "static" in riemann_hosts_config:
-            for line in riemann_hosts_config["static"]:
-                tmp.extend(cls._resolve_static_entry(line))
-
-        if "by_srv" in riemann_hosts_config:
-            for line in riemann_hosts_config["by_srv"]:
-                tmp.extend(cls._resolve_srv_hosts(line))
-
-        for riemann_host in tmp:
-            try:
-                if riemann_host.proto == 'tcp':
-                    riemann_connection = bernhard.Client(riemann_host.host,
-                                                         riemann_host.port,
-                                                         bernhard.TCPTransport)
-                elif riemann_host.proto == 'udp':
-                    riemann_connection = bernhard.Client(riemann_host.host,
-                                                         riemann_host.port,
-                                                         bernhard.UDPTransport)
-                else:
-                    logging.error("Unsupported transport {0}".format(riemann_host.proto) +
-                                  ", not connected to {1}".format(riemann_host))
-            except Exception as e:
-                logging.exception("Failed to connect to Rieman host " +
-                                  "{0}: {1}, ".format(riemann_host, str(e)) +
-                                  "address has been exluded from the list.")
-                continue
-
-            logging.debug("Connected to Riemann instance {0}".format(riemann_host))
-            cls._riemann_connections.append(riemann_connection)
-
-        if not cls._riemann_connections:
-            logging.error("There are no active connections to Riemann, " +
-                          "metrics will not be send!")
-
-    @classmethod
-    def notify_immediate(cls, exit_status, exit_message):
-        """
-        Imediatelly send given data to Riemann
-        """
-        if exit_status not in cls._STATES:
-            logging.error("Trying to issue an immediate notification" +
-                          "with malformed exit_status: " + exit_status)
-            return
-
-        if not exit_message:
-            logging.error("Trying to issue an immediate" +
-                          "notification without any message")
-            return
-
-        logging.warn("notify_immediate, " +
-                     "exit_status=<{0}>, exit_message=<{1}>".format(
-                     exit_status, exit_message))
-        event = {
-            'host': cls._hostname,
-            'service': SERVICE_NAME,
-            'state': exit_status,
-            'description': exit_message,
-            'tags': cls._riemann_tags,
-            'ttl': DATA_TTL,
-        }
-
-        cls._send_data(event)
-
-    @classmethod
-    def notify_agregated(cls):
-        """
-        Send all agregated data to Riemann
-        """
-
-        if cls._exit_status == 'ok' and cls._exit_message == '':
-            cls._exit_message = 'All certificates are OK'
-
-        logging.debug("notify_agregated, " +
-                      "exit_status=<{0}>, exit_message=<{1}>".format(
-                          cls._exit_status, cls._exit_message))
-
-        event = {
-            'host': cls._hostname,
-            'service': SERVICE_NAME,
-            'state': cls._exit_status,
-            'description': cls._exit_message,
-            'tags': cls._riemann_tags,
-            'ttl': DATA_TTL,
-        }
-
-        cls._send_data(event)
-
-    @classmethod
-    def update(cls, exit_status, exit_message):
-        """
-        Accumullate a small bit of data in class fields
-        """
-        if exit_status not in cls._STATES:
-            logging.error("Trying to do the status update" +
-                          "with malformed exit_status: " + exit_status)
-            return
-
-        logging.info("updating script status, " +
-                     "exit_status=<{0}>, exit_message=<{1}>".format(
-                         exit_status, exit_message))
-        if cls._STATES[cls._exit_status] < cls._STATES[exit_status]:
-            cls._exit_status = exit_status
-        # ^ we only escalate up...
-        if exit_message:
-            if cls._exit_message:
-                cls._exit_message += '\n'
-            cls._exit_message += exit_message
-
-
-class ScriptLock(object):
-    #python lockfile isn't usefull, we have to write our own class
-    _fh = None
-    _file_path = None
-
-    @classmethod
-    def init(cls, file_path):
-        cls._file_path = file_path
-
-    @classmethod
-    def aqquire(cls):
-        if cls._fh:
-            logging.warn("File lock already aquired")
-            return
-        try:
-            cls._fh = open(cls._file_path, 'w')
-            #flock is nice because it is automatically released when the
-            #process dies/terminates
-            fcntl.flock(cls._fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except IOError:
-            if cls._fh:
-                cls._fh.close()
-            raise RecoverableException("{0} ".format(cls._file_path) +
-                                       "is already locked by a different " +
-                                       "process or cannot be created.")
-        cls._fh.write(str(os.getpid()))
-        cls._fh.flush()
-
-    @classmethod
-    def release(cls):
-        if not cls._fh:
-            raise RecoverableException("Trying to release non-existant lock")
-        cls._fh.close()
-        cls._fh = None
-        os.unlink(cls._file_path)
-
-
 def parse_command_line():
     parser = argparse.ArgumentParser(
         description='Certificate checking tool',
@@ -631,8 +319,12 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
 
         #Initialize Riemann reporting:
         ScriptStatus.initialize(
+            riemann_enabled=ScriptConfiguration.get_val("riemann_enabled"),
             riemann_hosts_config=ScriptConfiguration.get_val("riemann_hosts"),
             riemann_tags=ScriptConfiguration.get_val("riemann_tags"),
+            riemann_ttl=ScriptConfiguration.get_val("riemann_ttl"),
+            riemann_service_name=SERVICE_NAME,
+            nrpe_enabled=ScriptConfiguration.get_val("nrpe_enabled"),
             debug=dont_send,
         )
 
