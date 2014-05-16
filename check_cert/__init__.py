@@ -260,16 +260,10 @@ def get_cert_expiration(certificate, ignored_certs):
             #Return datetime object:
             return datetime.strptime(expiry_date, '%Y%m%d%H%M%SZ')
         except Exception as e:
-            msg = "Script cannot parse certificate {0}: {1}".format(
-                  certificate.path, str(e))
-            logging.warn(msg)
-            ScriptStatus.update('unknown', msg)
             return None
     else:
-        ScriptStatus.update('unknown',
-                            "Certificate {0} is of unsupported type, ".format(
-                                certificate.path) +
-                            "the script cannot check the expiry date.")
+        logging.error("Certificate {0} ".format(certificate.path) +
+                      "is of unsupported type.")
         return None
 
 
@@ -367,6 +361,8 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                                       "ignored_certs")
                                                   )
             if cert_expiration is None:
+                ScriptStatus.update('unknown', "Script cannot parse certificate" +
+                                    "{0}".format(cert.path))
                 continue
             # -3 days is in fact -4 days, 23:59:58.817181
             # so we compensate and round up
