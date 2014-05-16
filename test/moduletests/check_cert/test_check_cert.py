@@ -25,7 +25,9 @@ from __future__ import with_statement
 # Global imports:
 from collections import namedtuple
 from datetime import datetime, timedelta
+from pymisc.script import RecoverableException, FatalException
 import fileinput
+import mock
 import os
 import subprocess
 import sys
@@ -34,7 +36,6 @@ if major == 2 and minor < 7:
     import unittest2 as unittest
 else:
     import unittest
-import mock
 
 # To perform local imports first we need to fix PYTHONPATH:
 pwd = os.path.abspath(os.path.dirname(__file__))
@@ -373,6 +374,7 @@ class TestCheckCert(unittest.TestCase):
         self.assertFalse(ScriptStatusMock.notify_immediate.called)
         self.assertTrue(ScriptStatusMock.notify_agregated.called)
         self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'critical')
+        ScriptStatusMock.reset_mock()
 
         # test if a certificate that is malformed/invalid is properly handled:
         def fake_cert_expiration(cert, ignored_certs):
@@ -385,6 +387,49 @@ class TestCheckCert(unittest.TestCase):
         self.assertFalse(ScriptStatusMock.notify_immediate.called)
         self.assertTrue(ScriptStatusMock.notify_agregated.called)
         self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'unknown')
+        ScriptStatusMock.reset_mock()
+
+    @mock.patch('check_cert.sys.exit')
+    @mock.patch('check_cert.get_cert_expiration')
+    @mock.patch('check_cert.CertStore')
+    def test_exception_handling(self, CertStoreMock, CertExpirationMock,
+                                 SysExitMock, ScriptConfigurationMock,
+                                 ScriptStatusMock, ScriptLockMock,
+                                 LoggingErrorMock, LoggingInfoMock,
+                                 LoggingWarnMock):
+
+        # A bit of a workaround, but we cannot simply call sys.exit
+        def terminate_script(exit_status):
+            raise SystemExit(exit_status)
+        SysExitMock.side_effect = terminate_script
+
+        #Provide some sane configuration:
+        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
+
+        # Test an exception from which we can recover:
+        def throw_test_exception(cert_extensions):
+            raise RecoverableException("this is just a test exception")
+        CertStoreMock.lookup_certs.side_effect = throw_test_exception
+
+        with self.assertRaises(SystemExit) as e:
+            check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 1)
+        self.assertTrue(LoggingErrorMock.called)
+        self.assertTrue(ScriptStatusMock.notify_immediate.called)
+        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0], 'unknown')
+        ScriptStatusMock.reset_mock()
+
+        # Test an fatal exception
+        def throw_test_exception(cert_extensions):
+            raise FatalException("this is just a test exception")
+        CertStoreMock.lookup_certs.side_effect = throw_test_exception
+
+        with self.assertRaises(SystemExit) as e:
+            check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 1)
+        self.assertTrue(LoggingErrorMock.called)
+        self.assertFalse(ScriptStatusMock.notify_immediate.called)
+        ScriptStatusMock.reset_mock()
 
 
 if __name__ == '__main__':

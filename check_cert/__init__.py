@@ -395,7 +395,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
 
     except RecoverableException as e:
         msg = str(e)
-        logging.critical(msg)
+        logging.error(msg)
         ScriptStatus.notify_immediate('unknown', msg)
         sys.exit(1)
     except AssertionError as e:
@@ -403,5 +403,5 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         raise
     except Exception as e:
         msg = "Exception occured: {0}".format(e.__class__.__name__)
-        logging.exception(msg)
+        logging.error(msg)
         sys.exit(1)
