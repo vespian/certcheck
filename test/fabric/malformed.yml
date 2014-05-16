@@ -1,5 +1,5 @@
 {
-    "lockfile": "./certcheck.lock",
+    "lockfile": "./check_cert.lock",
     "warn_treshold": 30,
     "critical_treshold": 15,
     "riemann_hosts": [

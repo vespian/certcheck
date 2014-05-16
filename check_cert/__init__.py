@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (c) 2014 Pawel Rozlach
 # Copyright (c) 2013 Spotify AB
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -47,7 +48,7 @@ import yaml
 LOCKFILE_LOCATION = './'+os.path.basename(__file__)+'.lock'
 CONFIGFILE_LOCATION = './'+os.path.basename(__file__)+'.conf'
 DATA_TTL = 25*60*60  # Data gathered by the script run is valid for 25 hours.
-SERVICE_NAME = 'certcheck'
+SERVICE_NAME = 'check_cert'
 CERTIFICATE_EXTENSIONS = ['der', 'crt', 'pem', 'cer', 'p12', 'pfx', ]
 
 
@@ -602,7 +603,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         handler.setFormatter(fmt)
         logger.addHandler(handler)
 
-        logger.info("Certcheck is starting, command line arguments:" +
+        logger.info("check_cert is starting, command line arguments:" +
                     "config_file={0}, ".format(config_file) +
                     "std_err={0}, ".format(std_err) +
                     "verbose={0}, ".format(verbose)

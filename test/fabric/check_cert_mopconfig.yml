@@ -1,5 +1,5 @@
 ---
-lockfile: /tmp/certcheck.lock
+lockfile: /tmp/check_cert.lock
 warn_treshold: 30
 critical_treshold: 15
 riemann_hosts:
@@ -11,14 +11,14 @@ riemann_hosts:
     - _riemann._udp
 riemann_tags:
   - production
-  - class::certcheck
+  - class::check_cert
 repo_host: git.example.com
 repo_port: 22
 repo_url: /sample-repo
 repo_masterbranch: refs/heads/production
-repo_localdir: /tmp/certcheck-temprepo
-repo_user: certcheck
-repo_pubkey: /home/vespian/work/tmp_tickets/cert_check/certcheck_id_rsa
+repo_localdir: /tmp/check_cert-temprepo
+repo_user: check_cert
+repo_pubkey: /home/vespian/work/tmp_tickets/cert_check/check_cert_id_rsa
 # sha1sum ./certificate_to_be_ignored
 # format - dict, hash as a key, and value as a comment
 ignored_certs:

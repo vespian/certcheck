@@ -1,5 +1,5 @@
 *.pyc
 /.coverage
 /build*
-certcheck.egg-info/*
+check_cert.egg-info/*
 debian/files

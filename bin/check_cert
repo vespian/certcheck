@@ -14,10 +14,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-import certcheck
+import check_cert
 
 
 if __name__ == '__main__':
-    args_dict = certcheck.parse_command_line()
+    args_dict = check_cert.parse_command_line()
 
-    certcheck.main(**args_dict)
+    check_cert.main(**args_dict)

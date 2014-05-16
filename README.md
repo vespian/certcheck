@@ -1,12 +1,12 @@
-# _Certchecker_
+# _check_cert_
 
-_Certchecker is a certificate expiration check capable of scanning GIT repos
+_check_cert is a certificate expiration check capable of scanning GIT repos
 and sending data on expiring/expired certificates back to the monitoring system
 (currently only Riemann)._
 
 ## Project Setup
 
-In order to run certchecker you need to following dependencies installed:
+In order to run check_certer you need to following dependencies installed:
 - Bernhard - Riemann client library (https://github.com/banjiewen/bernhard)
 - Google's protobuf library
 - yaml bindings for python (http://pyyaml.org/)
@@ -27,7 +27,7 @@ Actions taken by the script are determined by its command line and the
 configuration file. The command line has a build-in help system:
 
 ```
-usage: certcheck [-h] [--version] -c CONFIG_FILE [-v] [-s] [-d]
+usage: check_cert [-h] [--version] -c CONFIG_FILE [-v] [-s] [-d]
 
 Simple certificate expiration check
 
@@ -47,7 +47,7 @@ The configuration file is a plain YAML document. It's syntax is as follows:
 
 ```
 ---
-lockfile: /tmp/certcheck.lock
+lockfile: /tmp/check_cert.lock
 warn_treshold: 30
 critical_treshold: 15
 riemann_hosts:
@@ -59,14 +59,14 @@ riemann_hosts:
     - _riemann._udp
 riemann_tags:
   - production
-  - class::certcheck
+  - class::check_cert
 repo_host: git.example.net
 repo_port: 22
 repo_url: /example-repo
 repo_masterbranch: refs/heads/production
-repo_localdir: /tmp/certcheck-temprepo
-repo_user: certcheck
-repo_pubkey: ./certcheck_id_rsa
+repo_localdir: /tmp/check_cert-temprepo
+repo_user: check_cert
+repo_pubkey: ./check_cert_id_rsa
  # format - dict, hash as a key, and value as a comment
  # sha1sum ./certificate_to_be_ignored
 ignored_certs:
@@ -86,9 +86,9 @@ The connection is established using the $repo_pubkey pubkey, and the $repo_user
 itself should have very limited privileges.
 
 Next, the repository is scanned in search of files ending with one of the
-certcheck:CERTIFICATE_EXTENSIONS extensions. Currently all possible
+check_cert:CERTIFICATE_EXTENSIONS extensions. Currently all possible
 certificate extensions are listed but only ['pem', 'crt', 'cer'] are currently
-supported (see certcheck:get_cert_expiration method). For the remaing ones
+supported (see check_cert:get_cert_expiration method). For the remaing ones
 only a warning is issued.
 
 For each certificate found a sha1sum is computed, and if the result is found in
@@ -120,7 +120,7 @@ IP addresses/ports of the Riemann instances can be defined in two ways:
    the SRV entry itself.
 
 The final metric is send to *all* Riemann instances with TTL equal to
-certcheck:DATA_TTL == 25 hours.
+check_cert:DATA_TTL == 25 hours.
 
 ### Maintenance
 
@@ -145,7 +145,7 @@ test/ directory you can find:
 Unittests can be started either by using *nosetest* command:
 
 ```
-certcheck/ (master✗) # nosetests
+check_cert/ (master✗) # nosetests
 [20:33:02]
 ......
 ----------------------------------------------------------------------
@@ -157,7 +157,7 @@ OK
 or by issuing the *run_tests.py* command:
 
 ```
-certcheck/ (master✗) # run_tests.py
+check_cert/ (master✗) # run_tests.py
 [20:33:04]
 Created test certificate expired_3_days.pem
 Created test certificate expire_6_days.pem

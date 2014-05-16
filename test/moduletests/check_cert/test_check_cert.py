@@ -43,7 +43,7 @@ sys.path.append(os.path.abspath(pwd + '/../../modules/'))
 
 #Local imports:
 import file_paths as paths
-import certcheck
+import check_cert
 
 
 class TestCertCheck(unittest.TestCase):
@@ -94,35 +94,35 @@ class TestCertCheck(unittest.TestCase):
     @mock.patch('sys.exit')
     def test_config_file_parsing(self, SysExitMock, LoggingErrorMock):
         #Test malformed file loading
-        certcheck.ScriptConfiguration.load_config(paths.TEST_MALFORMED_CONFIG_FILE)
+        check_cert.ScriptConfiguration.load_config(paths.TEST_MALFORMED_CONFIG_FILE)
         self.assertTrue(LoggingErrorMock.called)
         SysExitMock.assert_called_once_with(1)
         SysExitMock.reset_mock()
 
         #Test non-existent file loading
-        certcheck.ScriptConfiguration.load_config(paths.TEST_NONEXISTANT_CONFIG_FILE)
+        check_cert.ScriptConfiguration.load_config(paths.TEST_NONEXISTANT_CONFIG_FILE)
         self.assertTrue(LoggingErrorMock.called)
         SysExitMock.assert_called_once_with(1)
 
         #Load the config file
-        certcheck.ScriptConfiguration.load_config(paths.TEST_CONFIG_FILE)
+        check_cert.ScriptConfiguration.load_config(paths.TEST_CONFIG_FILE)
 
         #String:
-        self.assertEqual(certcheck.ScriptConfiguration.get_val("repo_host"),
+        self.assertEqual(check_cert.ScriptConfiguration.get_val("repo_host"),
                          "git.foo.net")
         #List of strings
-        self.assertEqual(certcheck.ScriptConfiguration.get_val("riemann_tags"),
+        self.assertEqual(check_cert.ScriptConfiguration.get_val("riemann_tags"),
                          ['abc', 'def'])
         #Integer:
-        self.assertEqual(certcheck.ScriptConfiguration.get_val("warn_treshold"), 30)
+        self.assertEqual(check_cert.ScriptConfiguration.get_val("warn_treshold"), 30)
 
         #Key not in config file:
         with self.assertRaises(KeyError):
-            certcheck.ScriptConfiguration.get_val("not_a_field")
+            check_cert.ScriptConfiguration.get_val("not_a_field")
 
-    @mock.patch.object(certcheck.ScriptStatus, 'notify_immediate')  # same as below
+    @mock.patch.object(check_cert.ScriptStatus, 'notify_immediate')  # same as below
     @mock.patch('logging.warn')  # Unused, but masks error messages
-    @mock.patch.object(certcheck.ScriptStatus, 'update')
+    @mock.patch.object(check_cert.ScriptStatus, 'update')
     def test_cert_expiration_parsing(self, UpdateMock, *unused):
         IGNORED_CERTS = ['42b270cbd03eaa8c16c386e66f910195f769f8b1']
 
@@ -133,44 +133,44 @@ class TestCertCheck(unittest.TestCase):
 
         #Test an expired certificate:
         cert = self._certpath2namedtuple(paths.EXPIRED_3_DAYS)
-        expiry_time = certcheck.get_cert_expiration(
+        expiry_time = check_cert.get_cert_expiration(
                         cert, IGNORED_CERTS) - now
         self.assertEqual(expiry_time.days, -3)
 
         #Test an ignored certificate:
         cert = self._certpath2namedtuple(paths.IGNORED_CERT)
-        expiry_time = certcheck.get_cert_expiration(cert,
+        expiry_time = check_cert.get_cert_expiration(cert,
                         IGNORED_CERTS)
         self.assertEqual(expiry_time, None)
 
         #Test a good certificate:
         cert = self._certpath2namedtuple(paths.EXPIRE_21_DAYS)
-        expiry_time = certcheck.get_cert_expiration(cert,
+        expiry_time = check_cert.get_cert_expiration(cert,
                         IGNORED_CERTS) - now
         self.assertEqual(expiry_time.days, 21)
 
         #Test a DER certificate:
         cert = self._certpath2namedtuple(paths.EXPIRE_41_DAYS_DER)
-        certcheck.get_cert_expiration(cert, IGNORED_CERTS)
+        check_cert.get_cert_expiration(cert, IGNORED_CERTS)
         self.assertTrue(UpdateMock.called)
         self.assertEqual(UpdateMock.call_args_list[0][0][0], 'unknown')
 
         #Test a broken certificate:
         cert = self._certpath2namedtuple(paths.BROKEN_CERT)
-        certcheck.get_cert_expiration(cert, IGNORED_CERTS)
+        check_cert.get_cert_expiration(cert, IGNORED_CERTS)
         self.assertTrue(UpdateMock.called)
         self.assertEqual(UpdateMock.call_args_list[0][0][0], 'unknown')
 
     @mock.patch('logging.warn')
     def test_file_locking(self, LoggingWarnMock, *unused):
-        certcheck.ScriptLock.init(paths.TEST_LOCKFILE)
+        check_cert.ScriptLock.init(paths.TEST_LOCKFILE)
 
-        with self.assertRaises(certcheck.RecoverableException):
-            certcheck.ScriptLock.release()
+        with self.assertRaises(check_cert.RecoverableException):
+            check_cert.ScriptLock.release()
 
-        certcheck.ScriptLock.aqquire()
+        check_cert.ScriptLock.aqquire()
 
-        certcheck.ScriptLock.aqquire()
+        check_cert.ScriptLock.aqquire()
         self.assertTrue(LoggingWarnMock.called)
 
         self.assertTrue(os.path.exists(paths.TEST_LOCKFILE))
@@ -183,12 +183,12 @@ class TestCertCheck(unittest.TestCase):
             pid = int(pid_str)
             self.assertEqual(pid, os.getpid())
 
-        certcheck.ScriptLock.release()
+        check_cert.ScriptLock.release()
 
         child = os.fork()
         if not child:
             #we are in the child process:
-            certcheck.ScriptLock.aqquire()
+            check_cert.ScriptLock.aqquire()
             time.sleep(10)
             #script should not do any cleanup - it is part of the tests :)
         else:
@@ -206,27 +206,27 @@ class TestCertCheck(unittest.TestCase):
                 os.kill(child, 9)
                 assert False
 
-            with self.assertRaises(certcheck.RecoverableException):
-                certcheck.ScriptLock.aqquire()
+            with self.assertRaises(check_cert.RecoverableException):
+                check_cert.ScriptLock.aqquire()
 
             os.kill(child, 11)
 
             #now it should succed
-            certcheck.ScriptLock.aqquire()
+            check_cert.ScriptLock.aqquire()
 
     @mock.patch('logging.warn')  # Unused, but masks error messages
     @mock.patch('logging.info')
     @mock.patch('logging.error')
-    @mock.patch('certcheck.bernhard')
+    @mock.patch('check_cert.bernhard')
     def test_script_status(self, RiemannMock, LoggingErrorMock, LoggingInfoMock,
                            *unused):
         #There should be at least one tag defined:
-        certcheck.ScriptStatus.initialize(riemann_hosts_config={}, riemann_tags=[])
+        check_cert.ScriptStatus.initialize(riemann_hosts_config={}, riemann_tags=[])
         self.assertTrue(LoggingErrorMock.called)
         LoggingErrorMock.reset_mock()
 
         #There should be at least one Riemann host defined:
-        certcheck.ScriptStatus.initialize(riemann_hosts_config={},
+        check_cert.ScriptStatus.initialize(riemann_hosts_config={},
                                           riemann_tags=['tag1', 'tag2'])
         self.assertTrue(LoggingErrorMock.called)
         LoggingErrorMock.reset_mock()
@@ -239,7 +239,7 @@ class TestCertCheck(unittest.TestCase):
         RiemannMock.TCPTransport = 'TCPTransport'
         RiemannMock.Client.side_effect = side_effect
 
-        certcheck.ScriptStatus.initialize(riemann_hosts_config={
+        check_cert.ScriptStatus.initialize(riemann_hosts_config={
                                               'static': ['192.168.122.16:5555:udp']},
                                           riemann_tags=['tag1', 'tag2'])
         self.assertTrue(LoggingErrorMock.called)
@@ -249,16 +249,16 @@ class TestCertCheck(unittest.TestCase):
         RiemannMock.Client.reset_mock()
 
         #Mock should only allow legitimate exit_statuses
-        certcheck.ScriptStatus.notify_immediate("not a real status", "message")
+        check_cert.ScriptStatus.notify_immediate("not a real status", "message")
         self.assertTrue(LoggingErrorMock.called)
         LoggingErrorMock.reset_mock()
 
-        certcheck.ScriptStatus.update("not a real status", "message")
+        check_cert.ScriptStatus.update("not a real status", "message")
         self.assertTrue(LoggingErrorMock.called)
         LoggingErrorMock.reset_mock()
 
         #Done with syntax checking, now initialize the class properly:
-        certcheck.ScriptStatus.initialize(riemann_hosts_config={
+        check_cert.ScriptStatus.initialize(riemann_hosts_config={
                                               'static': ['1.2.3.4:1:udp',
                                                          '2.3.4.5:5555:tcp',]
                                               },
@@ -270,12 +270,12 @@ class TestCertCheck(unittest.TestCase):
         RiemannMock.Client.reset_mock()
 
         #Check if notify_immediate works
-        certcheck.ScriptStatus.notify_immediate("warn", "a warning message")
+        check_cert.ScriptStatus.notify_immediate("warn", "a warning message")
         self.assertTrue(LoggingInfoMock.called)
         LoggingErrorMock.reset_mock()
 
         proper_call = mock.call().send({'description': 'a warning message',
-                                          'service': 'certcheck',
+                                          'service': 'check_cert',
                                           'tags': ['tag1', 'tag2'],
                                           'state': 'warn',
                                           'host': platform.uname()[1],
@@ -288,16 +288,16 @@ class TestCertCheck(unittest.TestCase):
         RiemannMock.Client.reset_mock()
 
         #update method shoul escalate only up:
-        certcheck.ScriptStatus.update('warn', "this is a warning message.")
-        certcheck.ScriptStatus.update('ok', '')
-        certcheck.ScriptStatus.update('unknown', "this is a not-rated message.")
-        certcheck.ScriptStatus.update('ok', "this is an informational message.")
+        check_cert.ScriptStatus.update('warn', "this is a warning message.")
+        check_cert.ScriptStatus.update('ok', '')
+        check_cert.ScriptStatus.update('unknown', "this is a not-rated message.")
+        check_cert.ScriptStatus.update('ok', "this is an informational message.")
 
         proper_call = mock.call().send({'description':
                                           'this is a warning message.\n' +
                                           'this is a not-rated message.\n' +
                                           'this is an informational message.',
-                                          'service': 'certcheck',
+                                          'service': 'check_cert',
                                           'tags': ['tag1', 'tag2'],
                                           'state': 'unknown',
                                           'host': platform.uname()[1],
@@ -305,7 +305,7 @@ class TestCertCheck(unittest.TestCase):
                                          )
         # This call should be issued to *both* connection mocks, but we
         # simplify things here a bit:
-        certcheck.ScriptStatus.notify_agregated()
+        check_cert.ScriptStatus.notify_agregated()
         self.assertEqual(2, len([x for x in RiemannMock.Client.mock_calls
                                  if x == proper_call]))
         RiemannMock.reset_mock()
@@ -315,39 +315,39 @@ class TestCertCheck(unittest.TestCase):
         old_args = sys.argv
 
         #General parsing:
-        sys.argv = ['./certcheck', '-v', '-s', '-d', '-c', './certcheck.json']
-        parsed_cmdline = certcheck.parse_command_line()
+        sys.argv = ['./check_cert', '-v', '-s', '-d', '-c', './check_cert.json']
+        parsed_cmdline = check_cert.parse_command_line()
         self.assertEqual(parsed_cmdline, {'std_err': True,
-                                          'config_file': './certcheck.json',
+                                          'config_file': './check_cert.json',
                                           'verbose': True,
                                           'dont_send': True,
                                           })
 
         #Config file should be a mandatory argument:
-        sys.argv = ['./certcheck', ]
+        sys.argv = ['./check_cert', ]
         # Suppres warnings from argparse
         with mock.patch('sys.stderr'):
-            parsed_cmdline = certcheck.parse_command_line()
+            parsed_cmdline = check_cert.parse_command_line()
         SysExitMock.assert_called_once_with(2)
 
         #Test default values:
-        sys.argv = ['./certcheck', '-c', './certcheck.json']
-        parsed_cmdline = certcheck.parse_command_line()
+        sys.argv = ['./check_cert', '-c', './check_cert.json']
+        parsed_cmdline = check_cert.parse_command_line()
         self.assertEqual(parsed_cmdline, {'std_err': False,
-                                          'config_file': './certcheck.json',
+                                          'config_file': './check_cert.json',
                                           'verbose': False,
                                           'dont_send': False,
                                           })
 
         sys.argv = old_args
 
-    @mock.patch('certcheck.sys.exit')
-    @mock.patch('certcheck.get_cert_expiration')
-    @mock.patch('certcheck.CertStore')
-    @mock.patch('certcheck.ScriptLock', autospec=True)
-    @mock.patch('certcheck.ScriptStatus', autospec=True)
-    @mock.patch('certcheck.ScriptConfiguration', autospec=True)
-    @mock.patch('certcheck.logging', autospec=True)
+    @mock.patch('check_cert.sys.exit')
+    @mock.patch('check_cert.get_cert_expiration')
+    @mock.patch('check_cert.CertStore')
+    @mock.patch('check_cert.ScriptLock', autospec=True)
+    @mock.patch('check_cert.ScriptStatus', autospec=True)
+    @mock.patch('check_cert.ScriptConfiguration', autospec=True)
+    @mock.patch('check_cert.logging', autospec=True)
     def test_script_logic(self, LoggingMock, ScriptConfigurationMock,
                           ScriptStatusMock, ScriptLockMock, CertStoreMock,
                           CertExpirationMock, SysExitMock):
@@ -399,11 +399,11 @@ class TestCertCheck(unittest.TestCase):
         # Test if ScriptStatus gets properly initialized
         # and whether warn > crit condition is
         # checked as well
-        certcheck.ScriptConfiguration.get_val.side_effect = \
+        check_cert.ScriptConfiguration.get_val.side_effect = \
             script_conf_factory(warn_treshold=7)
 
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertEqual(e.exception.code, 1)
 
         proper_init_call = dict(riemann_hosts_config= {
@@ -414,30 +414,30 @@ class TestCertCheck(unittest.TestCase):
                                 debug=False)
         self.assertTrue(ScriptConfigurationMock.load_config.called)
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        certcheck.ScriptStatus.initialize.assert_called_once_with(**proper_init_call)
+        check_cert.ScriptStatus.initialize.assert_called_once_with(**proper_init_call)
 
         #this time test only the negative warn threshold:
-        certcheck.ScriptConfiguration.get_val.side_effect = \
+        check_cert.ScriptConfiguration.get_val.side_effect = \
             script_conf_factory(warn_treshold=-30)
         ScriptStatusMock.notify_immediate.reset_mock()
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
         self.assertEqual(e.exception.code, 1)
 
         #this time test only the crit threshold == 0 condition check:
-        certcheck.ScriptConfiguration.get_val.side_effect = \
+        check_cert.ScriptConfiguration.get_val.side_effect = \
             script_conf_factory(critical_treshold=-1)
 
         ScriptStatusMock.notify_immediate.reset_mock()
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
         self.assertEqual(e.exception.code, 1)
 
         #test if an expired cert is properly handled:
         ScriptStatusMock.notify_immediate.reset_mock()
-        certcheck.ScriptConfiguration.get_val.side_effect = \
+        check_cert.ScriptConfiguration.get_val.side_effect = \
             script_conf_factory()
 
         def fake_cert_expiration(cert, ignored_certs):
@@ -445,7 +445,7 @@ class TestCertCheck(unittest.TestCase):
             return datetime.utcnow() - timedelta(days=4)
         CertExpirationMock.side_effect = fake_cert_expiration
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertEqual(e.exception.code, 0)
         self.assertTrue(ScriptStatusMock.update.called)
         self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'critical')
@@ -464,7 +464,7 @@ class TestCertCheck(unittest.TestCase):
             return datetime.utcnow() + timedelta(days=7)
         CertExpirationMock.side_effect = fake_cert_expiration
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertEqual(e.exception.code, 0)
         self.assertTrue(ScriptLockMock.aqquire.called)
         self.assertTrue(ScriptLockMock.release.called)
@@ -482,7 +482,7 @@ class TestCertCheck(unittest.TestCase):
             return datetime.utcnow() + timedelta(days=21)
         CertExpirationMock.side_effect = fake_cert_expiration
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertEqual(e.exception.code, 0)
         self.assertTrue(ScriptLockMock.aqquire.called)
         self.assertTrue(ScriptLockMock.release.called)
@@ -500,7 +500,7 @@ class TestCertCheck(unittest.TestCase):
             return datetime.utcnow() + timedelta(days=40)
         CertExpirationMock.side_effect = fake_cert_expiration
         with self.assertRaises(SystemExit) as e:
-            certcheck.main(config_file='./certcheck.conf')
+            check_cert.main(config_file='./check_cert.conf')
         self.assertEqual(e.exception.code, 0)
         self.assertTrue(ScriptLockMock.aqquire.called)
         self.assertTrue(ScriptLockMock.release.called)
