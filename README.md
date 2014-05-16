@@ -7,14 +7,12 @@ and sending data on expiring/expired certificates back to the monitoring system
 ## Project Setup
 
 In order to run check_certer you need to following dependencies installed:
-- Bernhard - Riemann client library (https://github.com/banjiewen/bernhard)
-- Google's protobuf library
-- yaml bindings for python (http://pyyaml.org/)
 - Dulwich - python implementation of GIT (https://www.samba.org/~jelmer/dulwich/docs/)
 - *ssh* command in your PATH
 - argparse library
-- dnspython library (http://www.dnspython.org/)
 - pyOpenSSL (https://launchpad.net/pyopenssl/)
+- pymisc (https://github.com/vespian/pymisc)
+- python >=2.6
 
 You can also use debian packaging rules from debian/ directory to build a deb
 package.
@@ -47,9 +45,12 @@ The configuration file is a plain YAML document. It's syntax is as follows:
 
 ```
 ---
+#Global
 lockfile: /tmp/check_cert.lock
-warn_treshold: 30
-critical_treshold: 15
+
+#Riemann related:
+riemann_enabled: False
+riemann_ttl: 60
 riemann_hosts:
   static:
     - 192.168.122.16:5555:udp
@@ -60,18 +61,27 @@ riemann_hosts:
 riemann_tags:
   - production
   - class::check_cert
-repo_host: git.example.net
+
+#Nagios related:
+nrpe_enabled: True
+
+#Repository related:
+repo_host: git.example.com
 repo_port: 22
-repo_url: /example-repo
+repo_url: /sample-repo
 repo_masterbranch: refs/heads/production
 repo_localdir: /tmp/check_cert-temprepo
 repo_user: check_cert
-repo_pubkey: ./check_cert_id_rsa
- # format - dict, hash as a key, and value as a comment
- # sha1sum ./certificate_to_be_ignored
+repo_pubkey: /home/vespian/work/tmp_tickets/cert_check/check_cert_id_rsa
+
+#Check related:
+warn_treshold: 30
+critical_treshold: 15
+# sha1sum ./certificate_to_be_ignored
+# format - dict, hash as a key, and value as a comment
 ignored_certs:
-  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: "some VPN key"
-  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: "some unused certificate"
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: "cert a"
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: "cert b"
 ```
 
 ### Operation
@@ -101,9 +111,9 @@ $warn_tresh but more than $critical_tresh - a "warning" partial status is gene-
 rated. Unsuported certificate yields an 'unknown' state and expired ones of
 course the 'critical'.
 
-All the 'partial status' updates are agregated and each message can only ele-
-vate up the final status of the metric send to Riemann. Currently, the hierar-
-chy is as follows:
+All the 'partial status' updates are agregated by the 'pymisc' library and
+each message can only elevate up the final status of the metric send to
+monitoring system. Currently, the hierarchy is as follows:
 
        (lowest)ok->warn->critical->unknown(highest)
 
@@ -111,16 +121,14 @@ script errors, exceptions and unexcpected conditions result in imidiate elevatio
 to 'unknown' status and sending the metric to monitoring system ASAP if only
 possible.
 
-IP addresses/ports of the Riemann instances can be defined in two ways:
- * statically, by providing a list of riemann instances in $riemann_servers
-   var. The format of the list entry is hostname:port:proto. 'proto' can be one
-   of 'udp' or 'tcp'.
- * by providing a SRV record, i.e. '_riemann._udp'. All the values
-   (host, port) will be resolved automatically. Protocol is chosen basing on
-   the SRV entry itself.
-
-The final metric is send to *all* Riemann instances with TTL equal to
-check_cert:DATA_TTL == 25 hours.
+Interfacing with monitoring system is done by pymisc. Following options are
+passed directly to the library. Please see pymisc's documentation for
+information on their meaning:
+* $riemann_enabled
+* $riemann_ttl
+* $riemann_hosts
+* $riemann_tags
+* $nrpe_enabled
 
 ### Maintenance
 
