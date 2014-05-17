@@ -49,11 +49,25 @@ CERTIFICATE_EXTENSIONS = ['der', 'crt', 'pem', 'cer', 'p12', 'pfx', ]
 
 class PubkeySSHGitClient(SSHGitClient):
     """
-    Simple class used to add pubkey authentication to the SSHGitClient class.
+    Connect to GIT repos using pubkey authentication.
+
+    This simple class extends SSHGitClient class with pubkey authentication.
     In the base class it is not supported, and using password authentication
     for a script is insecure.
     """
     def __init__(self, host, pubkey, port=None, username=None, *args, **kwargs):
+        """
+        Initialize the class with authdata and call superclass constructor.
+
+        Please see SSHGitClient's class constructor for a documentation of
+        arguments not mentioned here.
+
+        Args:
+            host: host to connect to
+            pubkey: file path of the publickey to use
+            port: SSH port to connect to
+            username: username to use while connecting
+        """
         self.host = host
         self.port = port
         self.pubkey = pubkey
@@ -62,6 +76,10 @@ class PubkeySSHGitClient(SSHGitClient):
         self.alternative_paths = {}
 
     def _connect(self, cmd, path):
+        """
+        Override connection establishment in SSHGitClient class so that pubkey
+        is used.
+        """
         # FIXME: This has no way to deal with passphrases..
         # FIXME: can we rely on ssh being in PATH here ?
         args = ['ssh', '-x', '-oStrictHostKeyChecking=no']
@@ -88,17 +106,27 @@ class PubkeySSHGitClient(SSHGitClient):
 
 
 class LocalMirrorRepo(Repo):
+    """
+    Common GIT repo object extened with file searching capabilities.
+    """
     def lookup_files(self, determine_wants, root_sha=None, repo_path=''):
         """
-        Search the repo for files described by the determine_wants
-        function. The function itself operates on the file paths in a repo and
-        must return True for objects of interest.
+        Search the repo for files described by the determine_wants function.
 
         The search is done recursively, with each iteration scanning just one
         repo directory. In case a directory is found the root_sha and repo_path
         parameters are provided for a next iteration of the function.
 
-        The result is a list of the filenames accumulated by all iterations.
+        Args:
+            determine_wants: the function used to determine whether the file is
+                of interest. It operates on the file paths in a repo and must
+                return True for objects that match, False otherwise.
+            root_sha: sha of the tree object that search should be started from
+            repo_path: repo path of the tree object pointed by root_sha
+
+        Returns:
+            The result is a list of the named tuples containing file paths and
+            their contents, accumulated by all recursive calls:
         """
         file_list = []
         if root_sha is None:
@@ -133,8 +161,10 @@ class LocalMirrorRepo(Repo):
 
 class CertStore(object):
     """
-    Provides local clone of a remote repo plus some extra functionality to
-    ease extracting of the certificates from the repository
+    Provide local clone of a remote repo plus some extra functionality.
+
+    Class is meant to be an abstraction of the GIT repos complexity, allowing
+    easy extraction of certificates.
     """
     _remote = None
     _local = None
@@ -142,6 +172,18 @@ class CertStore(object):
     @classmethod
     def initialize(cls, host, port, pubkey, username, repo_localdir, repo_url,
                    repo_masterbranch):
+        """
+        Initialize CertStore object.
+
+        Args:
+            host: host to connect to
+            pubkey: file path of the publickey to use
+            port: SSH port to connect to
+            username: username to use while connecting
+            repo_localdir: path to use for local repo storage
+            repo_url: url of the repo to fetch
+            repo_masterbranch: git branch to fetch and scan
+        """
         if cls._remote is None:
             cls._remote = PubkeySSHGitClient(host=host,
                                              pubkey=pubkey,
@@ -170,9 +212,13 @@ class CertStore(object):
     @classmethod
     def lookup_certs(cls, cert_suffixes):
         """
-        Find all the certificates in the repository. The classification is made
-        by checking whether file suffix can be found in th list of certificate
-        suffixes found in cert_suffixes parameter.
+        Find all the certificates in the locally cached repository.
+
+        The classification whether file is a certificate or not is made basing
+        on the file suffix.
+
+        Args:
+            cert_suffixes: list of valid certificate suffixes
         """
         if cls._local is None:
             raise RecoverableException("Local repo mirror has not been " +
@@ -190,6 +236,9 @@ class CertStore(object):
 
 
 def parse_command_line():
+    """
+    Convert command line arguments into script runtime configuration.
+    """
     parser = argparse.ArgumentParser(
         description='Certificate checking tool',
         epilog="Author: vespian a t wp.pl",
@@ -262,6 +311,16 @@ def get_cert_expiration(certificate, ignored_certs):
 
 
 def main(config_file, std_err=False, verbose=True, dont_send=False):
+    """
+    Main function of the script
+
+    Args:
+        config_file: file path of the config file to load
+        std_err: whether print logging output to stderr
+        verbose: whether to provide verbose logging messages
+        dont_send: whether to sent data to monitoring system or just do a dry
+                   run
+    """
     try:
         # Configure logging:
         fmt = logging.Formatter('%(filename)s[%(process)d] %(levelname)s: ' +
