@@ -102,8 +102,8 @@ class TestCheckCert(unittest.TestCase):
                               "repo_pubkey": "./foo",
                               "lockfile": "./fake_lock.pid",
                               "ignored_certs": {
-                                  '42b270cbd03eaa8c16c386e66f910195f769f8b1':
-                                  "certificate used during unit-tests"
+                                  'a69d081221a9caf21b1c18907c800528d6f414d2':
+                                  "sample/path/ignored_cert.pem"
                                   }
                               }
 
@@ -140,8 +140,6 @@ class TestCheckCert(unittest.TestCase):
 
     def test_cert_expiration_parsing(self, ScriptConfigurationMock, ScriptStatusMock,
                                      *unused):
-        IGNORED_CERTS = ['42b270cbd03eaa8c16c386e66f910195f769f8b1']
-
         # -3 days is in fact -4 days, 23:59:58.817181
         # so we compensate and round up
         # additionally, openssl uses utc dates
@@ -149,32 +147,27 @@ class TestCheckCert(unittest.TestCase):
 
         # Test an expired certificate:
         cert = self._certpath2namedtuple(paths.EXPIRED_3_DAYS)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS) - now
+        expiry_time = check_cert.get_cert_expiration(cert) - now
         self.assertEqual(expiry_time.days, -3)
-
-        # Test an ignored certificate:
-        cert = self._certpath2namedtuple(paths.IGNORED_CERT)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS)
-        self.assertEqual(expiry_time, None)
 
         # Test a good certificate:
         cert = self._certpath2namedtuple(paths.EXPIRE_21_DAYS)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS) - now
+        expiry_time = check_cert.get_cert_expiration(cert) - now
         self.assertEqual(expiry_time.days, 21)
 
         # Test a DER certificate:
         cert = self._certpath2namedtuple(paths.EXPIRE_41_DAYS_DER)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS)
-        self.assertIs(expiry_time, None)
+        with self.assertRaises(RecoverableException) as e:
+            expiry_time = check_cert.get_cert_expiration(cert)
 
         # Test a broken certificate:
         cert = self._certpath2namedtuple(paths.BROKEN_CERT)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS)
-        self.assertIs(expiry_time, None)
+        with self.assertRaises(RecoverableException) as e:
+            expiry_time = check_cert.get_cert_expiration(cert)
 
         # Test a "TRUSTED" certificate:
         cert = self._certpath2namedtuple(paths.TRUSTED_EXPIRE_41_CERT)
-        expiry_time = check_cert.get_cert_expiration(cert, IGNORED_CERTS) - now
+        expiry_time = check_cert.get_cert_expiration(cert) - now
         self.assertEqual(expiry_time.days, 41)
 
     @mock.patch('sys.exit')
@@ -298,19 +291,58 @@ class TestCheckCert(unittest.TestCase):
             raise SystemExit(exit_status)
         SysExitMock.side_effect = terminate_script
 
+        #Fake configuration for the script:
+        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
+
         # Provide fake data for the script:
         fake_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
-        fake_cert_tuple.path = 'some_cert'
+        fake_cert_tuple.path = 'sample/path/sample_cert.pem'
         fake_cert_tuple.content = 'some content'
 
+        ignored_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
+        ignored_cert_tuple.path = 'sample/path/ignored_cert.pem'
+        ignored_cert_tuple.content = 'some ignored content'
+
+        unsupported_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
+        unsupported_cert_tuple.path = 'sample/path/unsupported_cert.der'
+        unsupported_cert_tuple.content = 'some unsupported content'
+
+        # simulate a git repo with an unsupported cert:
+        def fake_cert(cert_extensions):
+            return iter([unsupported_cert_tuple])
+        CertStoreMock.lookup_certs.side_effect = fake_cert
+
+        # test if unsupported certificate is properly handled
+        with self.assertRaises(SystemExit) as e:
+            check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 0)
+        self.assertFalse(ScriptStatusMock.notify_immediate.called)
+        self.assertTrue(ScriptStatusMock.notify_agregated.called)
+        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'unknown')
+        ScriptStatusMock.reset_mock()
+
+        # simulate a git repo with an ignored cert:
+        def fake_cert(cert_extensions):
+            return iter([ignored_cert_tuple])
+        CertStoreMock.lookup_certs.side_effect = fake_cert
+
+        # test if ignored certificate is properly handled:
+        with self.assertRaises(SystemExit) as e:
+            check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 0)
+        self.assertFalse(ScriptStatusMock.notify_immediate.called)
+        self.assertTrue(ScriptStatusMock.notify_agregated.called)
+        # All certs were ok, so a 'default' message should be send to Rieman
+        self.assertFalse(ScriptStatusMock.update.called)
+        ScriptStatusMock.reset_mock()
+
+        # simulate a git repo with a valid certificate
         def fake_cert(cert_extensions):
             return iter([fake_cert_tuple])
         CertStoreMock.lookup_certs.side_effect = fake_cert
 
-        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
-
         # test if an expired cert is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() - timedelta(days=4)
         CertExpirationMock.side_effect = fake_cert_expiration
@@ -324,7 +356,7 @@ class TestCheckCert(unittest.TestCase):
         ScriptStatusMock.reset_mock()
 
         # test if soon to expire (<critical) cert is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=7)
         CertExpirationMock.side_effect = fake_cert_expiration
@@ -337,7 +369,7 @@ class TestCheckCert(unittest.TestCase):
         ScriptStatusMock.reset_mock()
 
         # test if not so soon to expire (<warning) cert is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=21)
         CertExpirationMock.side_effect = fake_cert_expiration
@@ -350,7 +382,7 @@ class TestCheckCert(unittest.TestCase):
         ScriptStatusMock.reset_mock()
 
         # test if a good certificate is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=40)
         CertExpirationMock.side_effect = fake_cert_expiration
@@ -364,7 +396,7 @@ class TestCheckCert(unittest.TestCase):
         ScriptStatusMock.reset_mock()
 
         # test if a certificate that expires today is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow()
         CertExpirationMock.side_effect = fake_cert_expiration
@@ -377,9 +409,9 @@ class TestCheckCert(unittest.TestCase):
         ScriptStatusMock.reset_mock()
 
         # test if a certificate that is malformed/invalid is properly handled:
-        def fake_cert_expiration(cert, ignored_certs):
+        def fake_cert_expiration(cert):
             self.assertEqual(cert, fake_cert_tuple)
-            return None
+            raise RecoverableException()
         CertExpirationMock.side_effect = fake_cert_expiration
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')

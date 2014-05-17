@@ -276,38 +276,31 @@ def parse_command_line():
             }
 
 
-def get_cert_expiration(certificate, ignored_certs):
+def get_cert_expiration(certificate):
     """
-    Extract the certificate expiration date for a certificate blob. Handle
-    ignored certificates by comparing shasum of the blob with entries in the
-    ignored_certs list
+    Extract the certificate expiration date from a certificate blob.
+
+    Args:
+        certificate: a named tuple object, containing path and content attributes
+
+    Returns:
+        None if certificate was invalid or expiry date could not be extracted,
+        datetime object otherwise.
     """
-    if certificate.path[-3:] in ['pem', 'crt', 'cer']:
-        try:
-            # Many bad things can happen here, but still - we can recover! :)
-            cert_hash = hashlib.sha1(certificate.content).hexdigest()
-            if cert_hash in ignored_certs:
-                # This cert should be ignored
-                logging.info("certificate {0} (sha1sum: {1})".format(
-                             certificate.path, cert_hash) + " has been ignored.")
-                return None
-            # Workaround for -----BEGIN TRUSTED CERTIFICATE-----
-            if certificate.content.find('TRUSTED ') > -1:
-                logging.info("'TRUSTED' string has been removed from " +
-                             "certificate {0} (sha1sum: {1})".format(
-                                 certificate.path, cert_hash))
-                certificate.content = certificate.content.replace('TRUSTED ',
-                                                                  '')
-            cert_data = load_certificate(FILETYPE_PEM, certificate.content)
-            expiry_date = cert_data.get_notAfter()
-            # Return datetime object:
-            return datetime.strptime(expiry_date, '%Y%m%d%H%M%SZ')
-        except Exception:
-            return None
-    else:
-        logging.error("Certificate {0} ".format(certificate.path) +
-                      "is of unsupported type.")
-        return None
+    try:
+        # Many bad things can happen here, but still - we can recover! :)
+        # Workaround for -----BEGIN TRUSTED CERTIFICATE-----
+        if certificate.content.find('TRUSTED ') > -1:
+            logging.info("'TRUSTED' string has been removed from " +
+                         "certificate {0}".format(certificate.path))
+            certificate.content = certificate.content.replace('TRUSTED ',
+                                                              '')
+        cert_data = load_certificate(FILETYPE_PEM, certificate.content)
+        expiry_date = cert_data.get_notAfter()
+        # Return datetime object:
+        return datetime.strptime(expiry_date, '%Y%m%d%H%M%SZ')
+    except Exception:
+        raise RecoverableException()
 
 
 def main(config_file, std_err=False, verbose=True, dont_send=False):
@@ -408,15 +401,33 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                  "repo_masterbranch"),
                              )
 
+        ignored_certs=ScriptConfiguration.get_val("ignored_certs")
         for cert in CertStore.lookup_certs(CERTIFICATE_EXTENSIONS):
-            cert_expiration = get_cert_expiration(cert,
-                                                  ignored_certs=ScriptConfiguration.get_val(
-                                                      "ignored_certs")
-                                                  )
-            if cert_expiration is None:
+            #Check whether the cert needs to be included in checks at all:
+            cert_hash = hashlib.sha1(cert.content).hexdigest()
+            if cert_hash in ignored_certs:
+                # This cert should be ignored
+                logging.info("certificate {0} (sha1sum: {1})".format(
+                             cert.path, cert_hash) + " has been ignored.")
+                continue
+
+            #Check if certifice type is supported:
+            if cert.path[-3:] not in ['pem', 'crt', 'cer']:
+                ScriptStatus.update('unknown',
+                                    "Certificate {0} ".format(cert.path) +
+                                    "is not supported by the check script, " +
+                                    "please add it to ignore list or upgrade " +
+                                    "the script.")
+                continue
+
+            #Check the expiry date:
+            try:
+                cert_expiration = get_cert_expiration(cert)
+            except RecoverableException:
                 ScriptStatus.update('unknown', "Script cannot parse certificate" +
                                     "{0}".format(cert.path))
                 continue
+
             # -3 days is in fact -4 days, 23:59:58.817181
             # so we compensate and round up
             # additionally, openssl uses utc dates
