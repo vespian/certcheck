@@ -1,8 +1,7 @@
 # _check_cert_
 
 _check_cert is a certificate expiration check capable of scanning GIT repos
-and sending data on expiring/expired certificates back to the monitoring system
-(currently only Riemann)._
+and sending data on expiring/expired certificates back to the monitoring system._
 
 ## Project Setup
 
