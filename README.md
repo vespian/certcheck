@@ -11,7 +11,7 @@ In order to run check_certer you need to following dependencies installed:
 - argparse library
 - pyOpenSSL (https://launchpad.net/pyopenssl/)
 - pymisc (https://github.com/vespian/pymisc)
-- python >=2.6
+- python 2.6 or 2.7
 
 You can also use debian packaging rules from debian/ directory to build a deb
 package.
