@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (c) 2014 Pawel Rozlach
 # Copyright (c) 2013 Spotify AB
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
