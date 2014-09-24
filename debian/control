@@ -1,18 +1,17 @@
-Source: check_cert
+Source: check-cert
 Section: utils
 Priority: extra
-Maintainer: Vespian <vespian@wp.pl>
-Build-Depends: python (>= 2.6.6-3~), debhelper (>= 8), python-dnspython,
-    python-coverage, openssl, python-openssl, python-bernhard, python-argparse,
-    python-protobuf, python-unittest2, python-yaml, python-dulwich (>= 0.8),
-    openssh-client
-Standards-Version: 3.9.3
+Standards-Version: 3.9.4
+Maintainer: Pawel Rozlach <vespian@wp.pl>
+Homepage: https://github.com/vespian/check_cert
+Build-Depends: debhelper (>= 8), dh-python, python-all (>= 2.6.6-3~),
+    python-setuptools, python-coverage, python-mock (>= 1.0), python-openssl,
+    python-protobuf, python-dulwich (>= 0.8), openssh-client, openssl,
+    python-pymisc, python-argparse
 X-Python-Version: >= 2.6
 
-Package: check_cert
-Version: 0.2.0
+Package: check-cert
 Architecture: any
-Depends: ${python:Depends}, python-openssl, python-bernhard, python-argparse,
-    python-protobuf, python-yaml, python-dulwich (>= 0.8), openssh-client,
-    python-dnspython
+Depends: ${python:Depends}, ${misc:Depends}, python-openssl,
+    python-dulwich (>= 0.8), openssh-client, python-argparse, python-pymisc
 Description: Simple certificate check
