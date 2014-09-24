@@ -3,3 +3,6 @@
 /build*
 check_cert.egg-info/*
 debian/files
+*.swp
+debian/check-cert*
+.pybuild/
