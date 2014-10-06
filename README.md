@@ -5,16 +5,24 @@ and sending data on expiring/expired certificates back to the monitoring system.
 
 ## Project Setup
 
-In order to run check_certer you need to following dependencies installed:
+In order to run check_cert you need to have following dependencies installed:
 - Dulwich - python implementation of GIT (https://www.samba.org/~jelmer/dulwich/docs/)
 - *ssh* command in your PATH
 - argparse library
 - pyOpenSSL (https://launchpad.net/pyopenssl/)
 - pymisc (https://github.com/vespian/pymisc)
 - python 2.6 or 2.7
+- dulwich library
 
 You can also use debian packaging rules from debian/ directory to build a deb
 package.
+
+Unfortunatelly, dulwich library is broken on wheezy:
+
+https://bugs.launchpad.net/dulwich/+bug/1326213
+
+so the script depends on the newest version (0.9.7) even though 0.8.5 is
+sufficient when it comes to functionality.
 
 ## Usage
 
