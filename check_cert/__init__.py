@@ -393,7 +393,11 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         # discard messages
         ScriptConfiguration.load_config(config_file)
 
-        # Provide some sane default:
+        logger.debug("Loaded configuration: " +
+                     str(ScriptConfiguration.get_config())
+                     )
+
+        # Provide some sane defaults:
         try:
             repo_port = ScriptConfiguration.get_val("repo_port")
         except KeyError:
@@ -404,7 +408,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         except KeyError:
             ignored_certs = {}
 
-        logger.debug("Remote repo is is: {0}@{1}:{2}{3}->{4}".format(
+        logger.debug("Remote repo is: {0}@{1}{3}->{4}, tcp port {2}".format(
                      ScriptConfiguration.get_val("repo_user"),
                      ScriptConfiguration.get_val("repo_host"),
                      repo_port,
@@ -423,7 +427,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         # Initialize Riemann/NRPE reporting:
         if ScriptConfiguration.get_val("riemann_enabled") is True:
             ScriptStatus.initialize(
-                riemann_enabled=ScriptConfiguration.get_val("riemann_enabled"),
+                riemann_enabled=True,
                 riemann_hosts_config=ScriptConfiguration.get_val("riemann_hosts"),
                 riemann_tags=ScriptConfiguration.get_val("riemann_tags"),
                 riemann_ttl=ScriptConfiguration.get_val("riemann_ttl"),
@@ -463,6 +467,8 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                  "repo_masterbranch"),
                              )
 
+        unparsable_certs = {"number": 0, "paths": []}
+
         for cert in CertStore.lookup_certs(CERTIFICATE_EXTENSIONS):
             # Check whether the cert needs to be included in checks at all:
             cert_hash = hashlib.sha1(cert.content).hexdigest()
@@ -485,8 +491,8 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
             try:
                 cert_expiration = get_cert_expiration(cert)
             except RecoverableException:
-                ScriptStatus.update('unknown', "Script cannot parse certificate: " +
-                                    "{0}".format(cert.path))
+                unparsable_certs["number"] += 1
+                unparsable_certs["paths"].append(cert.path)
                 continue
 
             # -3 days is in fact -4 days, 23:59:58.817181
@@ -504,15 +510,27 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                         cert.path))
             elif time_left.days < ScriptConfiguration.get_val("critical_treshold"):
                 ScriptStatus.update('critical',
-                                    "Certificate {0} is about to expire in {1} days.".format(
-                                        cert.path, time_left.days))
+                                    "Certificate {0} is about to expire in"
+                                    "{0} days.".format(cert.path, time_left.days))
             elif time_left.days < ScriptConfiguration.get_val("warn_treshold"):
                 ScriptStatus.update('warn',
-                                    "Certificate {0} is about to expire in {1} days.".format(
-                                        cert.path, time_left.days))
+                                    "Certificate {0} is about to expire in"
+                                    "{0} days.".format(cert.path, time_left.days))
             else:
                 logger.info("{0} expires in {1} days - OK!".format(
                     cert.path, time_left.days))
+
+        # We do not want to pollute output in case when there are too many broken
+        # certs in the report.
+        if unparsable_certs["number"] > 0:
+            if unparsable_certs["number"] <= 2:
+                ScriptStatus.update('unknown',
+                                    'Script cannot parse certificates: '
+                                    ','.join(unparsable_certs["paths"]))
+            else:
+                ScriptStatus.update('unknown', 'Script cannot parse {0} '.format(
+                                    unparsable_certs["number"]) +
+                                    "certificates, please check with verbose out on")
 
         ScriptStatus.notify_agregated()
         ScriptLock.release()
