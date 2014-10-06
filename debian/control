@@ -6,7 +6,7 @@ Maintainer: Pawel Rozlach <vespian@wp.pl>
 Homepage: https://github.com/vespian/check_cert
 Build-Depends: debhelper (>= 8), dh-python, python-all (>= 2.6.6-3~),
     python-setuptools, python-coverage, python-mock (>= 1.0), python-openssl,
-    python-protobuf, python-dulwich (>= 0.8), openssh-client, openssl,
+    python-protobuf, python-dulwich (>= 0.9.7), openssh-client, openssl,
     python-pymisc (>= 1.2.0), python-argparse
 X-Python-Version: >= 2.6
 
