@@ -28,6 +28,7 @@ from OpenSSL.crypto import load_certificate
 from collections import namedtuple
 from datetime import datetime, timedelta
 from dulwich.client import SSHGitClient, SubprocessWrapper, TraditionalGitClient
+from dulwich.errors import GitProtocolError
 from dulwich.protocol import Protocol
 from dulwich.repo import Repo
 from pymisc.monitoring import ScriptStatus
@@ -83,6 +84,8 @@ class PubkeySSHGitClient(SSHGitClient):
         # FIXME: This has no way to deal with passphrases..
         # FIXME: can we rely on ssh being in PATH here ?
         args = ['ssh', '-x', '-oStrictHostKeyChecking=no']
+        if not (os.path.exists(self.pubkey) and os.access(self.pubkey, os.R_OK)):
+            raise GitProtocolError("Public key file is missing or incaccesible")
         args.extend(['-i', self.pubkey])
         if self.port is not None:
             args.extend(['-p', str(self.port)])
