@@ -344,10 +344,21 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         # discard messages
         ScriptConfiguration.load_config(config_file)
 
+        # Provide some sane default:
+        try:
+            repo_port = ScriptConfiguration.get_val("repo_port")
+        except KeyError:
+            repo_port = 22
+
+        try:
+            ignored_certs = ScriptConfiguration.get_val("ignored_certs")
+        except KeyError:
+            ignored_certs = {}
+
         logger.debug("Remote repo is is: {0}@{1}:{2}{3}->{4}".format(
                      ScriptConfiguration.get_val("repo_user"),
                      ScriptConfiguration.get_val("repo_host"),
-                     ScriptConfiguration.get_val("repo_port"),
+                     repo_port,
                      ScriptConfiguration.get_val("repo_url"),
                      ScriptConfiguration.get_val("repo_masterbranch")) +
                      ", local repository dir is {0}".format(
@@ -361,15 +372,16 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                      )
 
         # Initialize Riemann reporting:
-        ScriptStatus.initialize(
-            riemann_enabled=ScriptConfiguration.get_val("riemann_enabled"),
-            riemann_hosts_config=ScriptConfiguration.get_val("riemann_hosts"),
-            riemann_tags=ScriptConfiguration.get_val("riemann_tags"),
-            riemann_ttl=ScriptConfiguration.get_val("riemann_ttl"),
-            riemann_service_name=SERVICE_NAME,
-            nrpe_enabled=ScriptConfiguration.get_val("nrpe_enabled"),
-            debug=dont_send,
-        )
+        if ScriptConfiguration.get_val("riemann_enabled") is True:
+            ScriptStatus.initialize(
+                riemann_enabled=ScriptConfiguration.get_val("riemann_enabled"),
+                riemann_hosts_config=ScriptConfiguration.get_val("riemann_hosts"),
+                riemann_tags=ScriptConfiguration.get_val("riemann_tags"),
+                riemann_ttl=ScriptConfiguration.get_val("riemann_ttl"),
+                riemann_service_name=SERVICE_NAME,
+                nrpe_enabled=ScriptConfiguration.get_val("nrpe_enabled"),
+                debug=dont_send,
+            )
 
         # verify the configuration
         msg = []
@@ -394,7 +406,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
 
         # Initialize our repo mirror:
         CertStore.initialize(host=ScriptConfiguration.get_val("repo_host"),
-                             port=ScriptConfiguration.get_val("repo_port"),
+                             port=repo_port,
                              pubkey=ScriptConfiguration.get_val('repo_pubkey'),
                              username=ScriptConfiguration.get_val("repo_user"),
                              repo_localdir=ScriptConfiguration.get_val(
@@ -404,7 +416,6 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                  "repo_masterbranch"),
                              )
 
-        ignored_certs=ScriptConfiguration.get_val("ignored_certs")
         for cert in CertStore.lookup_certs(CERTIFICATE_EXTENSIONS):
             #Check whether the cert needs to be included in checks at all:
             cert_hash = hashlib.sha1(cert.content).hexdigest()
