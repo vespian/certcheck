@@ -108,13 +108,17 @@ class TestCheckCert(unittest.TestCase):
                                   }
                               }
 
-        def func(key):
-            config = good_configuration.copy()
-            config.update(kwargs)
+        config = good_configuration.copy()
+        config.update(kwargs)
+
+        def get_val(key):
             self.assertIn(key, config)
             return config[key]
 
-        return func
+        def get_config():
+            return config
+
+        return get_val, get_config
 
     @staticmethod
     def _certpath2namedtuple(path):
@@ -158,12 +162,12 @@ class TestCheckCert(unittest.TestCase):
 
         # Test a DER certificate:
         cert = self._certpath2namedtuple(paths.EXPIRE_41_DAYS_DER)
-        with self.assertRaises(RecoverableException) as e:
+        with self.assertRaises(RecoverableException):
             expiry_time = check_cert.get_cert_expiration(cert)
 
         # Test a broken certificate:
         cert = self._certpath2namedtuple(paths.BROKEN_CERT)
-        with self.assertRaises(RecoverableException) as e:
+        with self.assertRaises(RecoverableException):
             expiry_time = check_cert.get_cert_expiration(cert)
 
         # Test a "TRUSTED" certificate:
@@ -211,7 +215,9 @@ class TestCheckCert(unittest.TestCase):
         Test if script initializes its dependencies properly
         """
 
-        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
+            self._script_conf_factory()
 
         check_cert.main(config_file='./check_cert.conf')
 
@@ -247,38 +253,54 @@ class TestCheckCert(unittest.TestCase):
                              SysExitMock, ScriptConfigurationMock, ScriptStatusMock,
                              *unused):
 
-        def terminate_script(exit_status):
-            raise SystemExit(exit_status)
-        SysExitMock.side_effect = terminate_script
+        # Hack, hack, hack - we terminate script after a call to
+        # notify_immediate with a non-standard exit code hoping
+        # that it will be uniq enough to differentiate other
+        # errors
+        def terminate_script(*unused):
+            raise SystemExit(216)
+        ScriptStatusMock.notify_immediate.side_effect = terminate_script
 
         # Test if ScriptStatus gets properly initialized
         # and whether warn > crit condition is
         # checked as well
-        ScriptConfigurationMock.get_val.side_effect = \
-            self._script_conf_factory(warn_treshold=7, critical_treshold=15)
-
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
+            self._script_conf_factory(warn_treshold=7,
+                                      critical_treshold=15)
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 1)
+        self.assertEqual(e.exception.code, 216)
+        self.assertTrue(ScriptStatusMock.notify_immediate.called)
+        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
+                         'unknown')
+        ScriptStatusMock.notify_immediate.reset_mock()
 
         # this time test only the negative warn threshold:
-        check_cert.ScriptConfiguration.get_val.side_effect = \
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
             self._script_conf_factory(warn_treshold=-30)
-        ScriptStatusMock.notify_immediate.reset_mock()
+        ScriptStatusMock.notify_immediate.side_effect = terminate_script
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 216)
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(e.exception.code, 1)
+        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
+                         'unknown')
+        ScriptStatusMock.notify_immediate.reset_mock()
 
         # this time test only the crit threshold == 0 condition check:
-        check_cert.ScriptConfiguration.get_val.side_effect = \
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
             self._script_conf_factory(critical_treshold=-1)
-
-        ScriptStatusMock.notify_immediate.reset_mock()
+        ScriptStatusMock.notify_immediate.side_effect = terminate_script
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 216)
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(e.exception.code, 1)
+        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
+                         'unknown')
+        ScriptStatusMock.notify_immediate.reset_mock()
 
     @mock.patch('check_cert.sys.exit')
     @mock.patch('check_cert.get_cert_expiration')
@@ -292,8 +314,10 @@ class TestCheckCert(unittest.TestCase):
             raise SystemExit(exit_status)
         SysExitMock.side_effect = terminate_script
 
-        #Fake configuration for the script:
-        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
+        # Fake configuration for the script:
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
+            self._script_conf_factory()
 
         # Provide fake data for the script:
         fake_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
@@ -426,18 +450,20 @@ class TestCheckCert(unittest.TestCase):
     @mock.patch('check_cert.get_cert_expiration')
     @mock.patch('check_cert.CertStore')
     def test_exception_handling(self, CertStoreMock, CertExpirationMock,
-                                 SysExitMock, ScriptConfigurationMock,
-                                 ScriptStatusMock, ScriptLockMock,
-                                 LoggingErrorMock, LoggingInfoMock,
-                                 LoggingWarnMock):
+                                SysExitMock, ScriptConfigurationMock,
+                                ScriptStatusMock, ScriptLockMock,
+                                LoggingErrorMock, LoggingInfoMock,
+                                LoggingWarnMock):
 
         # A bit of a workaround, but we cannot simply call sys.exit
         def terminate_script(exit_status):
             raise SystemExit(exit_status)
         SysExitMock.side_effect = terminate_script
 
-        #Provide some sane configuration:
-        ScriptConfigurationMock.get_val.side_effect = self._script_conf_factory()
+        # Provide some sane configuration:
+        ScriptConfigurationMock.get_val.side_effect, \
+            ScriptConfigurationMock.get_config.side_effect = \
+            self._script_conf_factory()
 
         # Test an exception from which we can recover:
         def throw_test_exception(cert_extensions):
@@ -449,7 +475,8 @@ class TestCheckCert(unittest.TestCase):
         self.assertEqual(e.exception.code, 1)
         self.assertTrue(LoggingErrorMock.called)
         self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0], 'unknown')
+        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
+                         'unknown')
         ScriptStatusMock.reset_mock()
 
         # Test an fatal exception

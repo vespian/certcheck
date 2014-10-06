@@ -38,6 +38,7 @@ import hashlib
 import logging
 import logging.handlers as lh
 import os
+import re
 import subprocess
 import sys
 
@@ -306,6 +307,54 @@ def get_cert_expiration(certificate):
         raise RecoverableException()
 
 
+def _verify_conf(conf_hash):
+    """
+    Check if script configuration is sane.
+
+    This function takes care of checking if the script configuration is
+    logically correct.
+
+    Args:
+        conf_hash: A hash containing whole configuration, as defined in config
+            file.
+
+    Returns:
+        A list of errors/issues found in the configuration, or an empty list
+        if the configuration is OK.
+    """
+
+    msg = []
+
+    try:
+        warn_treshold = conf_hash['warn_treshold']
+        critical_treshold = conf_hash['critical_treshold']
+        repo_host = conf_hash['repo_host']
+        repo_url = conf_hash['repo_url']
+        repo_masterbranch = conf_hash['repo_masterbranch']
+        repo_localdir = conf_hash['repo_localdir']
+        repo_user = conf_hash['repo_user']
+        repo_pubkey = conf_hash['repo_pubkey']
+        lockfile = conf_hash['lockfile']
+    except KeyError as e:
+        msg.append('Mandatory parameter is missing: {0}'.format(str(e)))
+
+    # Verify thresholds:
+    if warn_treshold <= 0:
+        msg.append('Certificate expiration warn threshold should be > 0.')
+    if critical_treshold <= 0:
+        msg.append('Certificate expiration critical threshold should be > 0.')
+    if critical_treshold >= warn_treshold:
+        msg.append('Warninig threshold should be greater than critical treshold.')
+
+    # repo_host
+    if not re.match(r'^(([a-z0-9]\-*[a-z0-9]*){1,63}\.?){1,255}$', repo_host):
+        msg.append('Repo host {0} is not a valid domain name.'.format(repo_host))
+
+    # FIXME - add verification of other command line parameters
+
+    return msg
+
+
 def main(config_file, std_err=False, verbose=True, dont_send=False):
     """
     Main function of the script
@@ -371,7 +420,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                      ScriptConfiguration.get_val('critical_treshold'))
                      )
 
-        # Initialize Riemann reporting:
+        # Initialize Riemann/NRPE reporting:
         if ScriptConfiguration.get_val("riemann_enabled") is True:
             ScriptStatus.initialize(
                 riemann_enabled=ScriptConfiguration.get_val("riemann_enabled"),
@@ -380,25 +429,23 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                 riemann_ttl=ScriptConfiguration.get_val("riemann_ttl"),
                 riemann_service_name=SERVICE_NAME,
                 nrpe_enabled=ScriptConfiguration.get_val("nrpe_enabled"),
-                debug=dont_send,
-            )
+                debug=dont_send,)
+        else:
+            ScriptStatus.initialize(
+                nrpe_enabled=ScriptConfiguration.get_val("nrpe_enabled"),
+                debug=dont_send,)
 
-        # verify the configuration
-        msg = []
-        if ScriptConfiguration.get_val('warn_treshold') <= 0:
-            msg.append('certificate expiration warn threshold should be > 0.')
-        if ScriptConfiguration.get_val('critical_treshold') <= 0:
-            msg.append('certificate expiration critical threshold should be > 0.')
-        if ScriptConfiguration.get_val('critical_treshold') >= \
-                ScriptConfiguration.get_val('warn_treshold'):
-            msg.append('warninig threshold should be greater than critical treshold.')
-
-        # if there are problems with thresholds then there is no point in continuing:
-        if msg:
+        # Now, let's verify the configuration:
+        # FIXME - ScriptStatus might have been already initialized with
+        # incorrect config and in effect ScriptStatus.notify_immediate will
+        # not reach monitoring system
+        conf_issues = _verify_conf(ScriptConfiguration.get_config())
+        if conf_issues:
+            logging.debug("Configuration problems:\n\t" +
+                          '\n\t'.join(conf_issues))
             ScriptStatus.notify_immediate('unknown',
                                           "Configuration file contains errors: " +
-                                          ','.join(msg))
-            sys.exit(1)
+                                          ' '.join(conf_issues))
 
         # Make sure that we are the only ones running on the server:
         ScriptLock.init(ScriptConfiguration.get_val('lockfile'))
