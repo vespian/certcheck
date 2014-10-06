@@ -1,3 +1,9 @@
+check-cert (0.3.1+1) UNRELEASED; urgency=low
+
+  * Fix dependencies for dulwich.
+
+ -- vespian <vespian@debian01.tr.mop.vespian.net>  Mon, 06 Oct 2014 16:31:07 +0100
+
 check-cert (0.3.1) stable; urgency=low
 
   * Small fixes
