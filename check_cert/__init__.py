@@ -417,7 +417,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                              )
 
         for cert in CertStore.lookup_certs(CERTIFICATE_EXTENSIONS):
-            #Check whether the cert needs to be included in checks at all:
+            # Check whether the cert needs to be included in checks at all:
             cert_hash = hashlib.sha1(cert.content).hexdigest()
             if cert_hash in ignored_certs:
                 # This cert should be ignored
@@ -425,7 +425,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                              cert.path, cert_hash) + " has been ignored.")
                 continue
 
-            #Check if certifice type is supported:
+            # Check if certifice type is supported:
             if cert.path[-3:] not in ['pem', 'crt', 'cer']:
                 ScriptStatus.update('unknown',
                                     "Certificate {0} ".format(cert.path) +
@@ -434,7 +434,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
                                     "the script.")
                 continue
 
-            #Check the expiry date:
+            # Check the expiry date:
             try:
                 cert_expiration = get_cert_expiration(cert)
             except RecoverableException:
@@ -450,19 +450,19 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
             if time_left.days < 0:
                 ScriptStatus.update('critical',
                                     "Certificate {0} expired {1} days ago.".format(
-                                    cert.path, abs(time_left.days)))
+                                        cert.path, abs(time_left.days)))
             elif time_left.days == 0:
                 ScriptStatus.update('critical',
                                     "Certificate {0} expires today.".format(
-                                    cert.path))
+                                        cert.path))
             elif time_left.days < ScriptConfiguration.get_val("critical_treshold"):
                 ScriptStatus.update('critical',
                                     "Certificate {0} is about to expire in {1} days.".format(
-                                    cert.path, time_left.days))
+                                        cert.path, time_left.days))
             elif time_left.days < ScriptConfiguration.get_val("warn_treshold"):
                 ScriptStatus.update('warn',
                                     "Certificate {0} is about to expire in {1} days.".format(
-                                    cert.path, time_left.days))
+                                        cert.path, time_left.days))
             else:
                 logger.info("{0} expires in {1} days - OK!".format(
                     cert.path, time_left.days))
