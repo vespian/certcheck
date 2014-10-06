@@ -99,8 +99,8 @@ class PubkeySSHGitClient(SSHGitClient):
                                 stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE)
         con = SubprocessWrapper(proc)
-        logging.info("Connected to repo {0}:{1} via ssh".format(self.host,
-                     self.port if self.port else 22))
+        logging.info("Connected to repo {0}:{1} via ssh, cmd: {2}".format(
+                     self.host, self.port if self.port else 22, cmd))
         return (Protocol(con.read,
                          con.write,
                          report_activity=self._report_activity
@@ -427,7 +427,7 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
             try:
                 cert_expiration = get_cert_expiration(cert)
             except RecoverableException:
-                ScriptStatus.update('unknown', "Script cannot parse certificate" +
+                ScriptStatus.update('unknown', "Script cannot parse certificate: " +
                                     "{0}".format(cert.path))
                 continue
 
@@ -469,6 +469,6 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
         # Unittest require it:
         raise
     except Exception as e:
-        msg = "Exception occured: {0}".format(e.__class__.__name__)
+        msg = "Exception occured: {0}, msg: {1}".format(e.__class__.__name__, str(e))
         logging.error(msg)
         sys.exit(1)
