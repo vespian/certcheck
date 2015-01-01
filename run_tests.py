@@ -1,7 +1,5 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# Copyright (c) 2014 Pawel Rozlach
-# Copyright (c) 2013 Pawel Rozlach
+# Copyright (c) 2013 Spotify AB
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -42,11 +40,16 @@ def main():
     loader = unittest.TestLoader()
     tests = loader.discover('./test/')
     testRunner = unittest.runner.TextTestRunner(descriptions=True, verbosity=1)
-    testRunner.run(tests)
+    res = testRunner.run(tests)
 
     if "coverage" in sys.modules:
         cov.stop()
         cov.html_report()
+
+    if res.wasSuccessful():
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
