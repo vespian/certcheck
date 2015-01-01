@@ -15,29 +15,15 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-
-#Make it a bit more like python3:
-from __future__ import absolute_import
-from __future__ import print_function
-
-import coverage
-import os
-import shutil
+try:
+    import coverage
+except ImportError:
+    pass
 import sys
 import unittest
-
+import os
 
 def main():
-    major, minor, micro, releaselevel, serial = sys.version_info
-
-    if major == 2 and minor < 7:
-        print("In order to run tests you need at least Python 2.7")
-        sys.exit(1)
-
-    if major == 3:
-        print("Tests were not tested on Python 3.X, use at your own risk")
-        sys.exit(1)
-
     #Cleanup old html report:
     for root, dirs, files in os.walk('test/output_coverage_html/'):
         for f in files:
@@ -48,17 +34,19 @@ def main():
             shutil.rmtree(os.path.join(root, d))
 
     #Perform coverage analisys:
-    cov = coverage.coverage()
+    if "coverage" in sys.modules:
+        cov = coverage.coverage()
+        cov.start()
 
-    cov.start()
-    #Discover the test and execute them:
+    #Discover the tests and execute them:
     loader = unittest.TestLoader()
     tests = loader.discover('./test/')
     testRunner = unittest.runner.TextTestRunner(descriptions=True, verbosity=1)
     testRunner.run(tests)
-    cov.stop()
 
-    cov.html_report()
+    if "coverage" in sys.modules:
+        cov.stop()
+        cov.html_report()
 
 if __name__ == '__main__':
     main()
