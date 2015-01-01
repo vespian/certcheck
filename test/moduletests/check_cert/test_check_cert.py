@@ -50,10 +50,7 @@ import check_cert
 @mock.patch('logging.warn')
 @mock.patch('logging.info')
 @mock.patch('logging.error')
-@mock.patch('check_cert.ScriptLock', autospec=True)
-@mock.patch('check_cert.ScriptStatus', autospec=True)
-@mock.patch('check_cert.ScriptConfiguration', autospec=True)
-class TestCheckCert(unittest.TestCase):
+class TestCertificateParsing(unittest.TestCase):
     @staticmethod
     def _create_test_cert(days, path, is_der=False):
         openssl_cmd = ["/usr/bin/openssl", "req", "-x509", "-nodes",
@@ -80,6 +77,103 @@ class TestCheckCert(unittest.TestCase):
         else:
             print("Created test certificate {0}".format(os.path.basename(path)))
 
+    @staticmethod
+    def _certpath2namedtuple(path):
+        with open(path, 'rb') as fh:
+            cert = namedtuple("FileTuple", ['path', 'content'])
+            cert.path = path
+            cert.content = fh.read()
+            return cert
+
+    @classmethod
+    def setUpClass(cls):
+        # Prepare the test certificate tree:
+        cls._create_test_cert(-3, paths.EXPIRED_3_DAYS)
+        cls._create_test_cert(6, paths.EXPIRE_6_DAYS)
+        cls._create_test_cert(21, paths.EXPIRE_21_DAYS)
+        cls._create_test_cert(41, paths.EXPIRE_41_DAYS)
+        cls._create_test_cert(41, paths.EXPIRE_41_DAYS_DER, is_der=True,)
+        cls._create_test_cert(41, paths.TRUSTED_EXPIRE_41_CERT)
+
+        # Simulate a sample certificate that has non-standard header
+        for line in fileinput.input(paths.TRUSTED_EXPIRE_41_CERT, inplace=True):
+            print(line.replace('-----BEGIN CERTIFICATE-----',
+                               '-----BEGIN TRUSTED CERTIFICATE-----'), end="")
+
+    def setUp(self):
+        # -3 days is in fact -4 days, 23:59:58.817181
+        # so we compensate and round up
+        # additionally, openssl uses utc dates
+        self.now = datetime.utcnow() - timedelta(days=1)
+
+    def test_expired_cert(self, *unused):
+        # Test an expired certificate:
+        cert = self._certpath2namedtuple(paths.EXPIRED_3_DAYS)
+        expiry_time = check_cert.get_cert_expiration(cert) - self.now
+        self.assertEqual(expiry_time.days, -3)
+
+    def test_ok_cert(self, *unused):
+        # Test a good certificate:
+        cert = self._certpath2namedtuple(paths.EXPIRE_21_DAYS)
+        expiry_time = check_cert.get_cert_expiration(cert) - self.now
+        self.assertEqual(expiry_time.days, 21)
+
+    def test_der_cert(self, *unused):
+        # Test a DER certificate:
+        cert = self._certpath2namedtuple(paths.EXPIRE_41_DAYS_DER)
+        with self.assertRaises(RecoverableException):
+            check_cert.get_cert_expiration(cert)
+
+    def test_broken_cert(self, *unused):
+        # Test a broken certificate:
+        cert = self._certpath2namedtuple(paths.BROKEN_CERT)
+        with self.assertRaises(RecoverableException):
+            check_cert.get_cert_expiration(cert)
+
+    def test_trusted_cert(self, *unused):
+        # Test a "TRUSTED" certificate:
+        cert = self._certpath2namedtuple(paths.TRUSTED_EXPIRE_41_CERT)
+        expiry_time = check_cert.get_cert_expiration(cert) - self.now
+        self.assertEqual(expiry_time.days, 41)
+
+
+@mock.patch('sys.exit')
+class TestCommandLineParsing(unittest.TestCase):
+    def setUp(self):
+        self._old_args = sys.argv
+
+    def tearDown(self):
+        sys.argv = self._old_args
+
+    def test_proper_command_line_parsing(self, *unused):
+        # General parsing:
+        sys.argv = ['./check_cert', '-v', '-s', '-d', '-c', './check_cert.json']
+        parsed_cmdline = check_cert.parse_command_line()
+        self.assertEqual(parsed_cmdline, {'std_err': True,
+                                          'config_file': './check_cert.json',
+                                          'verbose': True,
+                                          'dont_send': True,
+                                          })
+
+    def test_config_file_missing_from_commandline(self, SysExitMock):
+        sys.argv = ['./check_cert', ]
+        # Suppres warnings from argparse
+        with mock.patch('sys.stderr'):
+            check_cert.parse_command_line()
+        SysExitMock.assert_called_once_with(2)
+
+    def test_default_command_line_args(self, *unused):
+        # Test default values:
+        sys.argv = ['./check_cert', '-c', './check_cert.json']
+        parsed_cmdline = check_cert.parse_command_line()
+        self.assertEqual(parsed_cmdline, {'std_err': False,
+                                          'config_file': './check_cert.json',
+                                          'verbose': False,
+                                          'dont_send': False,
+                                          })
+
+
+class TestCheckCert(unittest.TestCase):
     def _script_conf_factory(self, **kwargs):
         """
         Provide fake configuration data objects.
@@ -121,105 +215,71 @@ class TestCheckCert(unittest.TestCase):
         return get_val, get_config
 
     @staticmethod
-    def _certpath2namedtuple(path):
-        with open(path, 'rb') as fh:
-            cert = namedtuple("FileTuple", ['path', 'content'])
-            cert.path = path
-            cert.content = fh.read()
-            return cert
+    def _fake_cert_git_repo(cert_extensions):
+        fake_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
+        fake_cert_tuple.path = 'sample/path/sample_cert.pem'
+        fake_cert_tuple.content = 'some content'
+        return iter([fake_cert_tuple])
 
-    @classmethod
-    def setUpClass(cls):
-        # Prepare the test certificate tree:
-        cls._create_test_cert(-3, paths.EXPIRED_3_DAYS)
-        cls._create_test_cert(6, paths.EXPIRE_6_DAYS)
-        cls._create_test_cert(21, paths.EXPIRE_21_DAYS)
-        cls._create_test_cert(41, paths.EXPIRE_41_DAYS)
-        cls._create_test_cert(41, paths.EXPIRE_41_DAYS_DER, is_der=True,)
-        cls._create_test_cert(41, paths.TRUSTED_EXPIRE_41_CERT)
+    @staticmethod
+    def _ignored_cert_git_repo(cert_extensions):
+        ignored_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
+        ignored_cert_tuple.path = 'sample/path/ignored_cert.pem'
+        ignored_cert_tuple.content = 'some ignored content'
+        return iter([ignored_cert_tuple])
 
-        # Simulate a sample certificate that has non-standard header
-        for line in fileinput.input(paths.TRUSTED_EXPIRE_41_CERT, inplace=True):
-            print(line.replace('-----BEGIN CERTIFICATE-----',
-                               '-----BEGIN TRUSTED CERTIFICATE-----'), end="")
+    @staticmethod
+    def _unsupported_cert_git_repo(cert_extensions):
+        unsupported_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
+        unsupported_cert_tuple.path = 'sample/path/unsupported_cert.der'
+        unsupported_cert_tuple.content = 'some unsupported content'
+        return iter([unsupported_cert_tuple])
 
-    def test_cert_expiration_parsing(self, ScriptConfigurationMock, ScriptStatusMock,
-                                     *unused):
-        # -3 days is in fact -4 days, 23:59:58.817181
-        # so we compensate and round up
-        # additionally, openssl uses utc dates
-        now = datetime.utcnow() - timedelta(days=1)
+    def setUp(self):
+        self.mocks = {}
+        for patched in ['check_cert.ScriptConfiguration',
+                        'check_cert.ScriptStatus',
+                        'check_cert.ScriptLock',
+                        'logging.error',
+                        'logging.info',
+                        'logging.warn',
+                        'sys.exit',
+                        'check_cert.CertStore',
+                        'check_cert.get_cert_expiration']:
+            patcher = mock.patch(patched)
+            self.mocks[patched] = patcher.start()
+            self.addCleanup(patcher.stop)
 
-        # Test an expired certificate:
-        cert = self._certpath2namedtuple(paths.EXPIRED_3_DAYS)
-        expiry_time = check_cert.get_cert_expiration(cert) - now
-        self.assertEqual(expiry_time.days, -3)
+        # Hack, hack, hack - we terminate script after a call to
+        # notify_immediate with a non-standard exit code hoping
+        # that it will be uniq enough to differentiate other
+        # errors
+        def terminate_script(*unused):
+            raise SystemExit(-216)
+        self.mocks['check_cert.ScriptStatus'].notify_immediate.side_effect = \
+            terminate_script
 
-        # Test a good certificate:
-        cert = self._certpath2namedtuple(paths.EXPIRE_21_DAYS)
-        expiry_time = check_cert.get_cert_expiration(cert) - now
-        self.assertEqual(expiry_time.days, 21)
+        def terminate_script(exit_status):
+            raise SystemExit(exit_status)
+        self.mocks['sys.exit'].side_effect = terminate_script
 
-        # Test a DER certificate:
-        cert = self._certpath2namedtuple(paths.EXPIRE_41_DAYS_DER)
-        with self.assertRaises(RecoverableException):
-            expiry_time = check_cert.get_cert_expiration(cert)
+        # Fake configuration for the script:
+        self.mocks['check_cert.ScriptConfiguration'].get_val.side_effect, \
+            self.mocks['check_cert.ScriptConfiguration'].get_config.side_effect = \
+            self._script_conf_factory()
 
-        # Test a broken certificate:
-        cert = self._certpath2namedtuple(paths.BROKEN_CERT)
-        with self.assertRaises(RecoverableException):
-            expiry_time = check_cert.get_cert_expiration(cert)
+        self.mocks['check_cert.CertStore'].lookup_certs.side_effect = \
+            self._fake_cert_git_repo
 
-        # Test a "TRUSTED" certificate:
-        cert = self._certpath2namedtuple(paths.TRUSTED_EXPIRE_41_CERT)
-        expiry_time = check_cert.get_cert_expiration(cert) - now
-        self.assertEqual(expiry_time.days, 41)
-
-    @mock.patch('sys.exit')
-    def test_command_line_parsing(self, SysExitMock, *unused):
-        old_args = sys.argv
-
-        # General parsing:
-        sys.argv = ['./check_cert', '-v', '-s', '-d', '-c', './check_cert.json']
-        parsed_cmdline = check_cert.parse_command_line()
-        self.assertEqual(parsed_cmdline, {'std_err': True,
-                                          'config_file': './check_cert.json',
-                                          'verbose': True,
-                                          'dont_send': True,
-                                          })
-
-        # Config file should be a mandatory argument:
-        sys.argv = ['./check_cert', ]
-        # Suppres warnings from argparse
-        with mock.patch('sys.stderr'):
-            parsed_cmdline = check_cert.parse_command_line()
-        SysExitMock.assert_called_once_with(2)
-
-        # Test default values:
-        sys.argv = ['./check_cert', '-c', './check_cert.json']
-        parsed_cmdline = check_cert.parse_command_line()
-        self.assertEqual(parsed_cmdline, {'std_err': False,
-                                          'config_file': './check_cert.json',
-                                          'verbose': False,
-                                          'dont_send': False,
-                                          })
-
-        sys.argv = old_args
-
-    @mock.patch('sys.exit')
-    @mock.patch('check_cert.CertStore')
-    def test_script_init(self, CertStoreMock, SysExitMock,
-                         ScriptConfigurationMock, ScriptStatusMock,
-                         ScriptLockMock, *unused):
+    def test_script_init(self):
         """
         Test if script initializes its dependencies properly
         """
 
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
-            self._script_conf_factory()
+        with self.assertRaises(SystemExit) as e:
+            check_cert.main(config_file='./check_cert.conf')
 
-        check_cert.main(config_file='./check_cert.conf')
+        self.assertEqual(e.exception.code, 0)
 
         proper_init_call = dict(riemann_enabled=True,
                                 riemann_ttl=60,
@@ -231,10 +291,13 @@ class TestCheckCert(unittest.TestCase):
                                 riemann_tags=['abc', 'def'],
                                 nrpe_enabled=True,
                                 debug=False)
-        ScriptConfigurationMock.load_config.assert_called_once_with('./check_cert.conf')
-        ScriptLockMock.init.assert_called_once_with("./fake_lock.pid")
-        ScriptLockMock.aqquire.assert_called_once_with()
-        ScriptStatusMock.initialize.assert_called_once_with(**proper_init_call)
+        self.mocks['check_cert.ScriptConfiguration'].load_config.assert_called_once_with(
+            './check_cert.conf')
+        self.mocks['check_cert.ScriptLock'].init.assert_called_once_with(
+            "./fake_lock.pid")
+        self.mocks['check_cert.ScriptLock'].aqquire.assert_called_once_with()
+        self.mocks['check_cert.ScriptStatus'].initialize.assert_called_once_with(
+            **proper_init_call)
 
         proper_init_call = dict(host="git.foo.net",
                                 port=22,
@@ -244,253 +307,216 @@ class TestCheckCert(unittest.TestCase):
                                 repo_url="/foo-puppet",
                                 repo_masterbranch="refs/heads/foo",)
 
-        CertStoreMock.initialize.assert_called_once_with(**proper_init_call)
+        self.mocks['check_cert.CertStore'].initialize.assert_called_once_with(
+            **proper_init_call)
 
-    @mock.patch('sys.exit')
-    @mock.patch('check_cert.get_cert_expiration')
-    @mock.patch('check_cert.CertStore')
-    def test_sanity_checking(self, CertStoreMock, CertExpirationMock,
-                             SysExitMock, ScriptConfigurationMock, ScriptStatusMock,
-                             *unused):
-
-        # Hack, hack, hack - we terminate script after a call to
-        # notify_immediate with a non-standard exit code hoping
-        # that it will be uniq enough to differentiate other
-        # errors
-        def terminate_script(*unused):
-            raise SystemExit(216)
-        ScriptStatusMock.notify_immediate.side_effect = terminate_script
-
-        # Test if ScriptStatus gets properly initialized
-        # and whether warn > crit condition is
-        # checked as well
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
+    def test_warn_gt_crit(self):
+        self.mocks['check_cert.ScriptConfiguration'].get_val.side_effect, \
+            self.mocks['check_cert.ScriptConfiguration'].get_config.side_effect = \
             self._script_conf_factory(warn_treshold=7,
                                       critical_treshold=15)
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 216)
-        self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
-                         'unknown')
-        ScriptStatusMock.notify_immediate.reset_mock()
 
-        # this time test only the negative warn threshold:
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
+        self.assertEqual(e.exception.code, -216)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.call_args[0][0],
+            'unknown')
+
+    def test_negative_warn_thresh(self):
+        self.mocks['check_cert.ScriptConfiguration'].get_val.side_effect, \
+            self.mocks['check_cert.ScriptConfiguration'].get_config.side_effect = \
             self._script_conf_factory(warn_treshold=-30)
-        ScriptStatusMock.notify_immediate.side_effect = terminate_script
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 216)
-        self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
-                         'unknown')
-        ScriptStatusMock.notify_immediate.reset_mock()
 
-        # this time test only the crit threshold == 0 condition check:
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
+        self.assertEqual(e.exception.code, -216)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.call_args[0][0],
+            'unknown')
+
+    def test_crit_is_zero(self):
+        self.mocks['check_cert.ScriptConfiguration'].get_val.side_effect, \
+            self.mocks['check_cert.ScriptConfiguration'].get_config.side_effect = \
             self._script_conf_factory(critical_treshold=-1)
-        ScriptStatusMock.notify_immediate.side_effect = terminate_script
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 216)
-        self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
-                         'unknown')
-        ScriptStatusMock.notify_immediate.reset_mock()
 
-    @mock.patch('check_cert.sys.exit')
-    @mock.patch('check_cert.get_cert_expiration')
-    @mock.patch('check_cert.CertStore')
-    def test_certificate_testing(self, CertStoreMock, CertExpirationMock,
-                                 SysExitMock, ScriptConfigurationMock,
-                                 ScriptStatusMock, ScriptLockMock, *unused):
+        self.assertEqual(e.exception.code, -216)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.call_args[0][0],
+            'unknown')
 
-        # A bit of a workaround, but we cannot simply call sys.exit
-        def terminate_script(exit_status):
-            raise SystemExit(exit_status)
-        SysExitMock.side_effect = terminate_script
+    def test_unsuported_cert_detection(self):
+        self.mocks['check_cert.CertStore'].lookup_certs.side_effect = \
+            self._unsupported_cert_git_repo
 
-        # Fake configuration for the script:
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
-            self._script_conf_factory()
-
-        # Provide fake data for the script:
-        fake_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
-        fake_cert_tuple.path = 'sample/path/sample_cert.pem'
-        fake_cert_tuple.content = 'some content'
-
-        ignored_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
-        ignored_cert_tuple.path = 'sample/path/ignored_cert.pem'
-        ignored_cert_tuple.content = 'some ignored content'
-
-        unsupported_cert_tuple = namedtuple("FileTuple", ['path', 'content'])
-        unsupported_cert_tuple.path = 'sample/path/unsupported_cert.der'
-        unsupported_cert_tuple.content = 'some unsupported content'
-
-        # simulate a git repo with an unsupported cert:
-        def fake_cert(cert_extensions):
-            return iter([unsupported_cert_tuple])
-        CertStoreMock.lookup_certs.side_effect = fake_cert
-
-        # test if unsupported certificate is properly handled
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+
         self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'unknown')
-        ScriptStatusMock.reset_mock()
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0], 'unknown')
 
+    def test_ignored_cert_detection(self):
         # simulate a git repo with an ignored cert:
-        def fake_cert(cert_extensions):
-            return iter([ignored_cert_tuple])
-        CertStoreMock.lookup_certs.side_effect = fake_cert
+        self.mocks['check_cert.CertStore'].lookup_certs.side_effect = \
+            self._ignored_cert_git_repo
 
-        # test if ignored certificate is properly handled:
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+
         self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        # All certs were ok, so a 'default' message should be send to Rieman
-        self.assertFalse(ScriptStatusMock.update.called)
-        ScriptStatusMock.reset_mock()
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        # All certs were ok, so a 'default' message should be send to
+        # monitoring
+        self.assertFalse(self.mocks['check_cert.ScriptStatus'].update.called)
 
-        # simulate a git repo with a valid certificate
-        def fake_cert(cert_extensions):
-            return iter([fake_cert_tuple])
-        CertStoreMock.lookup_certs.side_effect = fake_cert
+    def test_expired_cert_detection(self):
 
-        # test if an expired cert is properly handled:
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() - timedelta(days=4)
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = \
+            fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 0)
-        self.assertTrue(ScriptStatusMock.update.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'critical')
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        ScriptStatusMock.reset_mock()
 
-        # test if soon to expire (<critical) cert is properly handled:
+        self.assertEqual(e.exception.code, 0)
+        self.assertTrue(self.mocks['check_cert.ScriptStatus'].update.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0],
+            'critical')
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+
+    def test_soon_to_expire_crit_cert_detection(self):
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=7)
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'critical')
-        ScriptStatusMock.reset_mock()
 
-        # test if not so soon to expire (<warning) cert is properly handled:
+        self.assertEqual(e.exception.code, 0)
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0], 'critical')
+
+    def test_soon_to_expire_warn_cert_detection(self):
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=21)
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'warn')
-        ScriptStatusMock.reset_mock()
 
-        # test if a good certificate is properly handled:
+        self.assertEqual(e.exception.code, 0)
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0], 'warn')
+
+    def test_ok_cert_detection(self):
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow() + timedelta(days=40)
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+
         self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
+        self.assertFalse(self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
         # All certs were ok, so a 'default' message should be send to Rieman
-        self.assertFalse(ScriptStatusMock.update.called)
-        ScriptStatusMock.reset_mock()
+        self.assertFalse(self.mocks['check_cert.ScriptStatus'].update.called)
 
-        # test if a certificate that expires today is properly handled:
+    def test_expire_today_cert_detection(self):
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             return datetime.utcnow()
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'critical')
-        ScriptStatusMock.reset_mock()
 
-        # test if a certificate that is malformed/invalid is properly handled:
+        self.assertEqual(e.exception.code, 0)
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0], 'critical')
+
+    def test_malformed_cert_detection(self):
         def fake_cert_expiration(cert):
-            self.assertEqual(cert, fake_cert_tuple)
             raise RecoverableException()
-        CertExpirationMock.side_effect = fake_cert_expiration
+        self.mocks['check_cert.get_cert_expiration'].side_effect = fake_cert_expiration
+
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
+
         self.assertEqual(e.exception.code, 0)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        self.assertTrue(ScriptStatusMock.notify_agregated.called)
-        self.assertEqual(ScriptStatusMock.update.call_args[0][0], 'unknown')
-        ScriptStatusMock.reset_mock()
+        self.assertFalse(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_agregated.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].update.call_args[0][0],
+            'unknown')
 
-    @mock.patch('check_cert.sys.exit')
-    @mock.patch('check_cert.get_cert_expiration')
-    @mock.patch('check_cert.CertStore')
-    def test_exception_handling(self, CertStoreMock, CertExpirationMock,
-                                SysExitMock, ScriptConfigurationMock,
-                                ScriptStatusMock, ScriptLockMock,
-                                LoggingErrorMock, LoggingInfoMock,
-                                LoggingWarnMock):
-
-        # A bit of a workaround, but we cannot simply call sys.exit
-        def terminate_script(exit_status):
-            raise SystemExit(exit_status)
-        SysExitMock.side_effect = terminate_script
-
-        # Provide some sane configuration:
-        ScriptConfigurationMock.get_val.side_effect, \
-            ScriptConfigurationMock.get_config.side_effect = \
-            self._script_conf_factory()
-
+    def test_recoverable_exception_handling(self):
         # Test an exception from which we can recover:
         def throw_test_exception(cert_extensions):
             raise RecoverableException("this is just a test exception")
-        CertStoreMock.lookup_certs.side_effect = throw_test_exception
+        self.mocks['check_cert.CertStore'].lookup_certs.side_effect = throw_test_exception
 
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 1)
-        self.assertTrue(LoggingErrorMock.called)
-        self.assertTrue(ScriptStatusMock.notify_immediate.called)
-        self.assertEqual(ScriptStatusMock.notify_immediate.call_args[0][0],
-                         'unknown')
-        ScriptStatusMock.reset_mock()
 
-        # Test an fatal exception
+        self.assertEqual(e.exception.code, -216)
+        self.assertTrue(
+            self.mocks['logging.error'].called)
+        self.assertTrue(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
+        self.assertEqual(
+            self.mocks['check_cert.ScriptStatus'].notify_immediate.call_args[0][0],
+            'unknown')
+
+    def test_fatal_exception_handling(self):
+        # Test a fatal exception
         def throw_test_exception(cert_extensions):
             raise FatalException("this is just a test exception")
-        CertStoreMock.lookup_certs.side_effect = throw_test_exception
+        self.mocks['check_cert.CertStore'].lookup_certs.side_effect = throw_test_exception
 
         with self.assertRaises(SystemExit) as e:
             check_cert.main(config_file='./check_cert.conf')
-        self.assertEqual(e.exception.code, 1)
-        self.assertTrue(LoggingErrorMock.called)
-        self.assertFalse(ScriptStatusMock.notify_immediate.called)
-        ScriptStatusMock.reset_mock()
 
+        self.assertEqual(e.exception.code, 1)
+        self.assertTrue(self.mocks['logging.error'].called)
+        self.assertFalse(self.mocks['check_cert.ScriptStatus'].notify_immediate.called)
 
 if __name__ == '__main__':
     unittest.main()
