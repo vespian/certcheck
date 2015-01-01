@@ -6,6 +6,7 @@ script: "./run_tests.py"
 before_script:
   - wget https://github.com/vespian/pymisc/archive/1.2.0.tar.gz -O /tmp/pymisc-1.2.0.tar.gz
   - tar -xvf /tmp/pymisc-1.2.0.tar.gz -C /tmp/
-  - cd /tmp/pymisc-1.2.0/ && /tmp/pymisc-1.2.0/setup.py install
-  - echo $TRAVIS_BUILD_DIR
+  - cd /tmp/pymisc-1.2.0/
+  - pip install -r ./requirements.txt --use-mirrors
+  - ./setup.py install
   - cd $TRAVIS_BUILD_DIR
