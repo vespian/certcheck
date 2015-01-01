@@ -1,5 +1,8 @@
 # _check_cert_
 
+[![Build
+Status](https://travis-ci.org/vespian/check-cert.svg?branch=master)](https://travis-ci.org/vespian/check-cert)
+
 _check_cert is a certificate expiration check capable of scanning GIT repos
 and sending data on expiring/expired certificates back to the monitoring system._
 
