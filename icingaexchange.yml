@@ -8,7 +8,7 @@ type: Plugin
 license: Apache 2.0
 releases:
     - name: 0.3.2
-      description: "0.3.2 release"
+      description: "All the features implemented and unittested."
       files:
          - name: 0.3.2.tar.gz
            description: plugin tarbal
