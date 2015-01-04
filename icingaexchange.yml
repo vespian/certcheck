@@ -1,0 +1,16 @@
+name: check-cert
+description: "file:///README.md"
+url: "https://github.com/vespian/check-cert"
+tags: certificate,git,ssl,tls
+vendor: Linux
+target: Website,Service
+type: Plugin
+license: Apache 2.0
+releases:
+    - name: 0.3.2
+      description: "0.3.2 release"
+      files:
+         - name: 0.3.2.tar.gz
+           description: plugin tarbal
+           url: "https://github.com/vespian/check-cert/archive/0.3.2.tar.gz"
+           checksum: 95985b6bca06fa410af7a0e8ca842f0b
