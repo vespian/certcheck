@@ -552,4 +552,5 @@ def main(config_file, std_err=False, verbose=True, dont_send=False):
     except Exception as e:
         msg = "Exception occured: {0}, msg: {1}".format(e.__class__.__name__, str(e))
         logging.error(msg)
+        logging.exception(e)
         sys.exit(1)
