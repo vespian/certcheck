@@ -136,11 +136,16 @@ class LocalMirrorRepo(Repo):
         if root_sha is None:
             commit = self.get_object(self.head())
             root_sha = commit.tree
-        root = self.get_object(root_sha)
+        logging.debug("Root sha is {0}".format(root_sha))
+        try:
+            root = self.get_object(root_sha)
+        except KeyError:
+            msg = "Skipping object from submodule: {0}, dir: {1}".format(root_sha, repo_path)
+            logging.warning(msg)
+            return file_list
         if repo_path:
             # Extreme verbosity
-            # logging.debug("Scanning repo directory {0}".format(repo_path))
-            pass
+            logging.debug("Scanning repo directory {0}".format(repo_path))
         else:
             logging.info("Scanning repo root directory")
 
